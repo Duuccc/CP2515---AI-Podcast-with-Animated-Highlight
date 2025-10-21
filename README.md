@@ -1,6 +1,6 @@
 # CP2515---AI-Podcast-with-Animated-Highlight
 
-**📋 1. Project Overview
+📋 1. Project Overview
 
 AI Podcast with Animated Highlight is a web application that automatically generates animated highlight clips from podcast audio using AI-based transcription, summarization, and visualization.
 Users can upload podcast audio, receive an automatically generated transcript, and view short highlight videos with dynamic captions or waveform animations.
@@ -14,6 +14,6 @@ Demonstrate the use of AI + media processing in content summarization and storyt
 
 👥 3. Team Members
 Role	Responsibility
-AI Engineer	AI model integration (Whisper, GPT, summarization, highlight detection)
-Backend Developer	Build FastAPI backend, handle upload, storage, and API endpoints
-Frontend/UI Developer	Develop React frontend, handle UI/UX, API integration, video display
+AI Engineer:	AI model integration (Whisper, GPT, summarization, highlight detection)
+Backend Developer:	Build FastAPI backend, handle upload, storage, and API endpoints
+Frontend/UI Developer:	Develop React frontend, handle UI/UX, API integration, video display
