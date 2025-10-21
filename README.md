@@ -1,6 +1,6 @@
 # CP2515---AI-Podcast-with-Animated-Highlight
 
-📋 1. Project Overview
+**📋 1. Project Overview
 
 AI Podcast with Animated Highlight is a web application that automatically generates animated highlight clips from podcast audio using AI-based transcription, summarization, and visualization.
 Users can upload podcast audio, receive an automatically generated transcript, and view short highlight videos with dynamic captions or waveform animations.
