@@ -12,8 +12,8 @@ Automatically generate animated short clips summarizing key podcast moments.
 Provide a clean, interactive web interface for uploading, previewing, and watching highlights.
 Demonstrate the use of AI + media processing in content summarization and storytelling.
 
-👥 3. Team Members
-Role	Responsibility
+👥 3. Team Members Role	Responsibility
+
 AI Engineer:	AI model integration (Whisper, GPT, summarization, highlight detection)
 Backend Developer:	Build FastAPI backend, handle upload, storage, and API endpoints
 Frontend/UI Developer:	Develop React frontend, handle UI/UX, API integration, video display
