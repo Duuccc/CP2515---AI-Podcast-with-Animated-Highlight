@@ -58,7 +58,7 @@ class HighlightDetector:
             # Try to expand to min_duration
             highlight = self._expand_segment(segment, segments)
             
-            # Check duration - use the correct key names!
+            # Check duration
             duration = highlight["end_time"] - highlight["start_time"]
             if self.min_duration <= duration <= self.max_duration:
                 highlights.append(highlight)

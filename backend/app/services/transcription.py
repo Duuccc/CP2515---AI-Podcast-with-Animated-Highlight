@@ -1,21 +1,4 @@
 import whisper
-import os
-from pathlib import Path
-from typing import Dict, List, Optional
-import logging
-
-logger = logging.getLogger(__name__)
-
-import whisper
-import torch
-import os
-from pathlib import Path
-from typing import Dict, List, Optional
-import logging
-
-logger = logging.getLogger(__name__)
-
-import whisper
 import torch
 import os
 from pathlib import Path
