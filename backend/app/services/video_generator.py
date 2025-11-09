@@ -1,10 +1,11 @@
-from moviepy.editor import (
+from moviepy import (
     AudioFileClip, 
     TextClip, 
     CompositeVideoClip,
     ColorClip,
     concatenate_videoclips
 )
+
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 from pathlib import Path
@@ -88,10 +89,11 @@ class VideoGenerator:
             logger.info("Compositing video...")
             video_clips = [background, waveform_clip, title_clip] + subtitle_clips
             final_video = CompositeVideoClip(video_clips, size=(self.width, self.height))
-            final_video = final_video.set_duration(duration)
+            final_video = final_video.with_duration(duration)  # Changed: set_duration → with_duration
+
             
             # 7. Add audio
-            final_video = final_video.set_audio(audio_clip)
+            final_video = final_video.with_audio(audio_clip)  # Changed: set_audio → with_audio
             
             # 8. Export video
             logger.info(f"Exporting to: {output_path}")
@@ -128,7 +130,7 @@ class VideoGenerator:
     ) -> AudioFileClip:
         """Extract a segment from the audio file"""
         audio = AudioFileClip(audio_path)
-        segment = audio.subclip(start_time, end_time)
+        segment = audio.subclipped(start_time, end_time)  # ✅ FIXED: subclipped
         audio.close()
         return segment
     
@@ -161,27 +163,26 @@ class VideoGenerator:
         """Create title text overlay"""
         try:
             txt_clip = TextClip(
-                title,
-                fontsize=70,
+                text=title,  # Changed: txt → text
+                font_size=70,  # Changed: fontsize → font_size
                 color='white',
                 font='Arial-Bold',
                 stroke_color='black',
                 stroke_width=3,
-                method='caption',
                 size=(self.width - 100, None),
-                align='center'
+                method='caption'
             )
             
             # Position at top, fade in and out
-            txt_clip = txt_clip.set_position(('center', 100))
-            txt_clip = txt_clip.set_duration(duration)
+            txt_clip = txt_clip.with_position(('center', 100))  # Changed: set_position → with_position
+            txt_clip = txt_clip.with_duration(duration)  # Changed: set_duration → with_duration
             txt_clip = txt_clip.crossfadein(0.3).crossfadeout(0.3)
             
             return txt_clip
         except Exception as e:
             logger.warning(f"Could not create title card: {e}")
             # Return empty clip if title creation fails
-            return ColorClip(size=(1, 1), color=(0,0,0), duration=duration).set_opacity(0)
+            return ColorClip(size=(1, 1), color=(0,0,0)).with_duration(duration).with_opacity(0)  # Changed: set_opacity → with_opacity
     
     def _create_animated_subtitles(
         self,
@@ -205,24 +206,23 @@ class VideoGenerator:
             try:
                 # Create text clip for this chunk
                 txt_clip = TextClip(
-                    chunk_text,
-                    fontsize=60,
+                    text=chunk_text,  # Changed: txt → text
+                    font_size=60,  # Changed: fontsize → font_size
                     color='white',
                     font='Arial-Bold',
                     stroke_color='black',
                     stroke_width=2,
-                    method='caption',
                     size=(self.width - 100, None),
-                    align='center'
+                    method='caption'
                 )
                 
                 # Position at bottom third
-                txt_clip = txt_clip.set_position(('center', self.height * 0.7))
+                txt_clip = txt_clip.with_position(('center', self.height * 0.7))  # Changed: set_position → with_position
                 
                 # Set timing
                 start_time = i * chunk_duration
-                txt_clip = txt_clip.set_start(start_time)
-                txt_clip = txt_clip.set_duration(chunk_duration)
+                txt_clip = txt_clip.with_start(start_time)  # Changed: set_start → with_start
+                txt_clip = txt_clip.with_duration(chunk_duration)  # Changed: set_duration → with_duration
                 
                 # Add fade transitions
                 if i > 0:  # Not first chunk
@@ -244,11 +244,11 @@ class VideoGenerator:
         # Full waveform visualization is complex and can be added later
         waveform = ColorClip(
             size=(self.width - 200, 150),
-            color=self.accent_color,
-            duration=duration
-        )
-        waveform = waveform.set_opacity(0.3)
-        waveform = waveform.set_position(('center', self.height * 0.45))
+            color=self.accent_color
+        ).with_duration(duration)  # Changed: set_duration → with_duration
+        
+        waveform = waveform.with_opacity(0.3)  # Changed: set_opacity → with_opacity
+        waveform = waveform.with_position(('center', self.height * 0.45))  # Changed: set_position → with_position
         
         return waveform
     

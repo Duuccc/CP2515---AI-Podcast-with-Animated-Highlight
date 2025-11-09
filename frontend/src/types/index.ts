@@ -29,8 +29,10 @@ export interface ProcessingStatusResponse {
   progress: number;
   message: string;
   highlights?: Highlight[];
-  video_url?: string;
+  video_url?: string;          // Keep for backward compatibility
+  video_urls?: string[];       // NEW: Array of video URLs
   error?: string;
+  transcript?: string;         // NEW: Full transcript text
 }
 
 export interface ProcessRequest {

@@ -20,22 +20,24 @@ class UploadResponse(BaseModel):
 class ProcessRequest(BaseModel):
     job_id: str
     highlight_duration: Optional[int] = 60
-    style: Optional[str] = "waveform"  # waveform, captions, animated
+    style: Optional[str] = "waveform"
 
 class Highlight(BaseModel):
     start_time: float
     end_time: float
     text: str
     confidence: float
-    reason: str  # Why this was selected as highlight
+    reason: str
 
 class ProcessingStatusResponse(BaseModel):
     job_id: str
     status: ProcessingStatus
-    progress: int  # 0-100
+    progress: int
     message: str
     highlights: Optional[List[Highlight]] = None
-    video_url: Optional[str] = None
+    video_url: Optional[str] = None        # Single video (backward compatibility)
+    video_urls: Optional[List[str]] = None # NEW: Multiple videos
+    transcript: Optional[str] = None       # NEW: Full transcript
     error: Optional[str] = None
 
 class JobStatus(BaseModel):

@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pathlib import Path
 import json
 from datetime import datetime
+import logging
 
 from app.models.schemas import ProcessRequest, ProcessingStatusResponse, ProcessingStatus
 from app.core.config import settings
@@ -14,6 +15,8 @@ router = APIRouter()
 
 # In-memory storage for job status
 job_statuses = {}
+
+logger = logging.getLogger("app.api.routes.process")
 
 async def process_audio_task(job_id: str, audio_path: str):
     """Background task to process audio and generate videos"""
