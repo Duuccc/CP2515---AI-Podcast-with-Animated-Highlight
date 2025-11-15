@@ -1,39 +1,167 @@
-from moviepy import (
-    AudioFileClip, 
-    TextClip, 
-    CompositeVideoClip,
-    ColorClip,
-    concatenate_videoclips
+from moviepy.editor import (
+    AudioFileClip,
+    CompositeVideoClip
 )
-
+from moviepy.video.VideoClip import VideoClip
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
-from pathlib import Path
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import os
+import tempfile
+import textwrap
 
 logger = logging.getLogger(__name__)
 
 class VideoGenerator:
     """
-    Generate social media-ready highlight videos
-    Optimized for TikTok/Instagram Reels (9:16 aspect ratio)
+    Generate animated social media-ready highlight videos with MoviePy
     """
     
     def __init__(self):
-        # Video dimensions (9:16 aspect ratio for vertical video)
         self.width = 1080
         self.height = 1920
         self.fps = 30
         
-        # Colors
-        self.bg_color_start = (59, 130, 246)  # Blue
-        self.bg_color_end = (147, 51, 234)    # Purple
-        self.text_color = (255, 255, 255)     # White
-        self.accent_color = (34, 211, 238)    # Cyan
+        # Color scheme
+        self.bg_color_start = (59, 130, 246)   # Blue
+        self.bg_color_end = (147, 51, 234)     # Purple
+        self.text_color = (255, 255, 255)      # White
+        self.accent_color = (34, 211, 238)     # Cyan
+        
+        # Try to find a suitable font
+        self.font_path = self._find_font()
         
         logger.info(f"VideoGenerator initialized: {self.width}x{self.height} @ {self.fps}fps")
+        logger.info(f"Using font: {self.font_path if self.font_path else 'default'}")
+    
+    def _find_font(self) -> Optional[str]:
+        """Try to find a suitable font path for PIL"""
+        # Common font paths on different systems
+        font_paths = [
+            # Windows
+            "C:/Windows/Fonts/arial.ttf",
+            "C:/Windows/Fonts/arialbd.ttf",
+            "C:/Windows/Fonts/calibri.ttf",
+            "C:/Windows/Fonts/calibrib.ttf",
+            # Linux
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            # macOS
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/Library/Fonts/Arial.ttf",
+        ]
+        
+        for path in font_paths:
+            if os.path.exists(path):
+                try:
+                    # Test if font can be loaded
+                    ImageFont.truetype(path, size=80)
+                    return path
+                except:
+                    continue
+        
+        return None
+    
+    def _create_text_image(
+        self,
+        text: str,
+        width: int,
+        font_size: int = 65,
+        color: Tuple[int, int, int] = (255, 255, 255),
+        stroke_color: Tuple[int, int, int] = (0, 0, 0),
+        stroke_width: int = 3
+    ) -> Image.Image:
+        """Create a PIL image with text rendered"""
+        # Load font
+        font = None
+        if self.font_path:
+            try:
+                font = ImageFont.truetype(self.font_path, size=font_size)
+            except:
+                pass
+        
+        if font is None:
+            try:
+                # Try to load default font with size
+                font = ImageFont.load_default()
+            except:
+                font = None
+        
+        # Wrap text to fit width
+        max_chars_per_line = width // (font_size // 2) if font else width // 20
+        wrapped_lines = textwrap.wrap(text, width=max_chars_per_line)
+        
+        # Calculate text dimensions
+        if font:
+            # Get text dimensions
+            bbox = None
+            for line in wrapped_lines:
+                try:
+                    bbox = font.getbbox(line)
+                    break
+                except:
+                    # Fallback if getbbox not available
+                    try:
+                        bbox = font.getsize(line)
+                        bbox = (0, 0, bbox[0], bbox[1])
+                    except:
+                        pass
+            
+            if bbox:
+                line_height = bbox[3] - bbox[1] if len(bbox) == 4 else font_size
+            else:
+                line_height = font_size
+        else:
+            line_height = font_size
+        
+        text_height = len(wrapped_lines) * (line_height + 10)
+        text_width = width - 40
+        
+        # Create image with transparent background
+        img = Image.new('RGBA', (text_width, text_height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        
+        # Draw text with stroke
+        y_offset = 0
+        for line in wrapped_lines:
+            if font:
+                # Draw stroke (outline)
+                if stroke_width > 0:
+                    for adj in range(-stroke_width, stroke_width + 1):
+                        for adj2 in range(-stroke_width, stroke_width + 1):
+                            if adj != 0 or adj2 != 0:
+                                try:
+                                    draw.text(
+                                        (20 + adj, y_offset + adj2),
+                                        line,
+                                        font=font,
+                                        fill=stroke_color
+                                    )
+                                except:
+                                    draw.text(
+                                        (20 + adj, y_offset + adj2),
+                                        line,
+                                        fill=stroke_color
+                                    )
+                
+                # Draw main text
+                try:
+                    draw.text((20, y_offset), line, font=font, fill=color)
+                except:
+                    draw.text((20, y_offset), line, fill=color)
+            else:
+                # Fallback without font
+                if stroke_width > 0:
+                    for adj in range(-stroke_width, stroke_width + 1):
+                        for adj2 in range(-stroke_width, stroke_width + 1):
+                            if adj != 0 or adj2 != 0:
+                                draw.text((20 + adj, y_offset + adj2), line, fill=stroke_color)
+                draw.text((20, y_offset), line, fill=color)
+            
+            y_offset += line_height + 10
+        
+        return img
     
     def create_highlight_video(
         self,
@@ -42,85 +170,136 @@ class VideoGenerator:
         output_path: str,
         title: str = "Podcast Highlight"
     ) -> str:
-        """
-        Create a video for a single highlight
+        """Create an animated video with effects"""
+        audio_clip = None
+        final_video = None
         
-        Args:
-            audio_path: Path to original audio file
-            highlight: Dict with start_time, end_time, text
-            output_path: Where to save the video
-            title: Optional title for the video
-            
-        Returns:
-            Path to generated video file
-        """
         try:
-            logger.info(f"Creating video: {highlight['start_time']:.1f}s - {highlight['end_time']:.1f}s")
+            logger.info(f"🎬 Creating animated video: {highlight['start_time']:.1f}s - {highlight['end_time']:.1f}s")
+            
+            # Ensure output directory exists
+            output_dir = os.path.dirname(output_path)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
             
             # 1. Extract audio segment
-            logger.info("Extracting audio segment...")
+            logger.info("🎵 Extracting audio...")
             audio_clip = self._extract_audio_segment(
                 audio_path,
                 highlight['start_time'],
                 highlight['end_time']
             )
             duration = audio_clip.duration
+            logger.info(f"✅ Audio extracted: {duration:.2f}s")
             
-            # 2. Create background
-            logger.info("Creating background...")
-            background = self._create_gradient_background(duration)
+            # Ensure minimum duration
+            if duration < 1.0:
+                raise ValueError(f"Audio segment too short: {duration:.2f}s")
             
-            # 3. Create title card (first 2 seconds)
-            logger.info("Creating title card...")
-            title_clip = self._create_title_card(title, min(2.0, duration * 0.2))
+            # 2. Create animated background
+            logger.info("🌈 Creating animated background...")
+            background = self._create_animated_gradient(duration)
+            background = background.set_fps(self.fps)
             
-            # 4. Create animated subtitles
-            logger.info("Creating subtitles...")
+            # 3. Create animated waveform
+            logger.info("📊 Creating waveform...")
+            waveform = self._create_animated_waveform(audio_clip, duration)
+            if waveform:
+                waveform = waveform.set_fps(self.fps)
+            
+            # 4. Create title card with animation
+            logger.info("📝 Creating title card...")
+            title_clip = self._create_animated_title(title, duration)
+            if title_clip:
+                title_clip = title_clip.set_fps(self.fps)
+            
+            # 5. Create animated subtitles
+            logger.info("💬 Creating animated subtitles...")
             subtitle_clips = self._create_animated_subtitles(
                 highlight['text'],
                 duration
             )
+            for clip in subtitle_clips:
+                clip.set_fps(self.fps)
             
-            # 5. Create waveform visualization
-            logger.info("Creating waveform...")
-            waveform_clip = self._create_waveform_placeholder(duration)
+            # 6. Add decorative elements
+            logger.info("✨ Adding decorative elements...")
+            decorations = self._create_decorations(duration)
+            if decorations:
+                decorations = decorations.set_fps(self.fps)
             
-            # 6. Combine all visual elements
-            logger.info("Compositing video...")
-            video_clips = [background, waveform_clip, title_clip] + subtitle_clips
-            final_video = CompositeVideoClip(video_clips, size=(self.width, self.height))
-            final_video = final_video.with_duration(duration)  # Changed: set_duration → with_duration
-
+            # 7. Composite all elements
+            logger.info("🎨 Compositing video...")
+            all_clips = [background]
             
-            # 7. Add audio
-            final_video = final_video.with_audio(audio_clip)  # Changed: set_audio → with_audio
+            # Add optional clips if they exist
+            if decorations:
+                all_clips.append(decorations)
+            if waveform:
+                all_clips.append(waveform)
+            if title_clip:
+                all_clips.append(title_clip)
+            all_clips.extend(subtitle_clips)
             
-            # 8. Export video
-            logger.info(f"Exporting to: {output_path}")
+            # Create composite with proper sizing
+            final_video = CompositeVideoClip(
+                all_clips, 
+                size=(self.width, self.height),
+                bg_color=(0, 0, 0)  # Black background as fallback
+            )
+            final_video = final_video.set_duration(duration)
+            final_video = final_video.set_fps(self.fps)
+            
+            # 8. Add audio
+            if audio_clip:
+                final_video = final_video.set_audio(audio_clip)
+            
+            # 9. Add fade in/out
+            logger.info("🎭 Adding transitions...")
+            fade_duration = min(0.5, duration / 4)  # Don't fade more than 25% of video
+            final_video = final_video.fadein(fade_duration).fadeout(fade_duration)
+            
+            # 10. Export
+            logger.info(f"💾 Exporting to: {output_path}")
+            temp_audio_path = os.path.join(tempfile.gettempdir(), f'temp-audio-{os.getpid()}.m4a')
+            
             final_video.write_videofile(
                 output_path,
                 fps=self.fps,
                 codec='libx264',
                 audio_codec='aac',
-                temp_audiofile=f'temp-audio-{os.getpid()}.m4a',
+                temp_audiofile=temp_audio_path,
                 remove_temp=True,
-                logger=None,  # Suppress moviepy verbose output
-                preset='medium',  # Balance between speed and quality
-                bitrate='2000k'   # Good quality for social media
+                logger=None,
+                preset='medium',
+                bitrate='2500k',
+                threads=4,
+                verbose=False
             )
             
-            # 9. Cleanup
-            audio_clip.close()
-            final_video.close()
+            file_size = os.path.getsize(output_path)
+            logger.info(f"✅ Video created: {file_size:,} bytes ({file_size / 1024 / 1024:.2f} MB)")
             
-            logger.info(f"Video created successfully: {output_path}")
             return output_path
             
         except Exception as e:
-            logger.error(f"Video generation failed: {str(e)}")
+            logger.error(f"❌ Video generation failed: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             raise Exception(f"Video generation error: {str(e)}")
+        
+        finally:
+            # Cleanup
+            if audio_clip:
+                try:
+                    audio_clip.close()
+                except:
+                    pass
+            if final_video:
+                try:
+                    final_video.close()
+                except:
+                    pass
     
     def _extract_audio_segment(
         self,
@@ -128,171 +307,334 @@ class VideoGenerator:
         start_time: float,
         end_time: float
     ) -> AudioFileClip:
-        """Extract a segment from the audio file"""
-        audio = AudioFileClip(audio_path)
-        segment = audio.subclipped(start_time, end_time)  # ✅ FIXED: subclipped
-        audio.close()
-        return segment
-    
-    def _create_gradient_background(self, duration: float) -> ColorClip:
-        """Create an animated gradient background"""
-        def make_frame(t):
-            # Create gradient image
-            img = Image.new('RGB', (self.width, self.height))
-            draw = ImageDraw.Draw(img)
-            
-            # Animate gradient position
-            offset = int((t / duration) * 100) % 100
-            
-            for y in range(self.height):
-                # Calculate color at this y position
-                progress = (y + offset) / self.height
-                
-                r = int(self.bg_color_start[0] + (self.bg_color_end[0] - self.bg_color_start[0]) * progress)
-                g = int(self.bg_color_start[1] + (self.bg_color_end[1] - self.bg_color_start[1]) * progress)
-                b = int(self.bg_color_start[2] + (self.bg_color_end[2] - self.bg_color_start[2]) * progress)
-                
-                draw.line([(0, y), (self.width, y)], fill=(r, g, b))
-            
-            return np.array(img)
+        """Extract audio segment with error handling"""
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
         
-        from moviepy.video.VideoClip import VideoClip
-        return VideoClip(make_frame, duration=duration)
-    
-    def _create_title_card(self, title: str, duration: float) -> TextClip:
-        """Create title text overlay"""
+        audio = None
         try:
-            txt_clip = TextClip(
-                text=title,  # Changed: txt → text
-                font_size=70,  # Changed: fontsize → font_size
-                color='white',
-                font='Arial-Bold',
-                stroke_color='black',
-                stroke_width=3,
-                size=(self.width - 100, None),
-                method='caption'
+            audio = AudioFileClip(audio_path)
+            audio_duration = audio.duration
+            
+            # Clamp times to valid range
+            start_time = max(0, min(start_time, audio_duration))
+            end_time = max(start_time + 0.1, min(end_time, audio_duration))
+            
+            if end_time <= start_time:
+                raise ValueError(f"Invalid time range: {start_time} to {end_time}")
+            
+            segment = audio.subclip(start_time, end_time)
+            return segment
+        except Exception as e:
+            if audio:
+                try:
+                    audio.close()
+                except:
+                    pass
+            raise Exception(f"Failed to extract audio segment: {str(e)}")
+    
+    def _create_animated_gradient(self, duration: float) -> VideoClip:
+        """Create animated gradient background"""
+        def make_frame(t):
+            try:
+                # Animate gradient position
+                offset = int((t / duration) * 200) % 200
+
+                # Create RGB image directly (no alpha needed for background)
+                img = Image.new('RGB', (self.width, self.height))
+                pixels = img.load()
+
+                for y in range(self.height):
+                    # Animated gradient
+                    progress = ((y + offset) % (self.height * 2)) / (self.height * 2)
+                    progress = min(1.0, max(0.0, progress))  # Clamp to [0, 1]
+
+                    r = int(self.bg_color_start[0] + (self.bg_color_end[0] - self.bg_color_start[0]) * progress)
+                    g = int(self.bg_color_start[1] + (self.bg_color_end[1] - self.bg_color_start[1]) * progress)
+                    b = int(self.bg_color_start[2] + (self.bg_color_end[2] - self.bg_color_start[2]) * progress)
+
+                    # Clamp color values
+                    r = max(0, min(255, r))
+                    g = max(0, min(255, g))
+                    b = max(0, min(255, b))
+
+                    # Draw horizontal line
+                    for x in range(self.width):
+                        pixels[x, y] = (r, g, b)
+
+                return np.array(img)
+            except Exception as e:
+                logger.warning(f"Error creating gradient frame at t={t}: {e}")
+                # Return solid color as fallback
+                return np.full((self.height, self.width, 3), self.bg_color_start, dtype=np.uint8)
+        
+        clip = VideoClip(make_frame, duration=duration)
+        clip = clip.set_fps(self.fps)
+        return clip
+    
+    def _create_animated_waveform(self, audio_clip, duration: float) -> Optional[VideoClip]:
+        """Create animated audio waveform visualization"""
+        try:
+            def make_frame(t):
+                try:
+                    # Create waveform image with RGB (no alpha for compositing)
+                    img = Image.new('RGB', (self.width, 200), (0, 0, 0))
+                    draw = ImageDraw.Draw(img)
+                    
+                    # Create animated bars
+                    num_bars = 40
+                    bar_width = max(1, (self.width - 200) // num_bars)
+                    center_y = 100
+                    
+                    for i in range(num_bars):
+                        # Animate bar height based on time and position
+                        phase = t * 3 + i * 0.5
+                        height_variation = np.sin(phase) * 0.3 + 0.7
+                        bar_height = int(80 * height_variation)
+                        
+                        x = 100 + i * bar_width
+                        y_top = center_y - bar_height // 2
+                        y_bottom = center_y + bar_height // 2
+                        
+                        # Use accent color with varying intensity
+                        intensity = int(255 * height_variation)
+                        r = int(self.accent_color[0] * intensity / 255)
+                        g = int(self.accent_color[1] * intensity / 255)
+                        b = int(self.accent_color[2] * intensity / 255)
+                        
+                        draw.rectangle(
+                            [x, y_top, x + bar_width - 2, y_bottom],
+                            fill=(r, g, b)
+                        )
+                    
+                    return np.array(img)
+                except Exception as e:
+                    logger.warning(f"Error creating waveform frame at t={t}: {e}")
+                    return np.zeros((200, self.width, 3), dtype=np.uint8)
+            
+            waveform_clip = VideoClip(make_frame, duration=duration)
+            waveform_clip = waveform_clip.set_fps(self.fps)
+            waveform_clip = waveform_clip.set_position(('center', int(self.height * 0.4)))
+            return waveform_clip
+        except Exception as e:
+            logger.warning(f"Failed to create waveform: {e}")
+            return None
+    
+    def _create_animated_title(self, title: str, duration: float) -> Optional[CompositeVideoClip]:
+        """Create animated title with effects using PIL"""
+        try:
+            title_duration = min(3.0, duration * 0.3)
+            if title_duration < 0.5:
+                return None
+            
+            # Create text image using PIL
+            text_img = self._create_text_image(
+                title,
+                width=self.width - 100,
+                font_size=80,
+                color=(255, 255, 255),
+                stroke_color=(0, 0, 0),
+                stroke_width=3
             )
             
-            # Position at top, fade in and out
-            txt_clip = txt_clip.with_position(('center', 100))  # Changed: set_position → with_position
-            txt_clip = txt_clip.with_duration(duration)  # Changed: set_duration → with_duration
-            txt_clip = txt_clip.crossfadein(0.3).crossfadeout(0.3)
+            # Convert PIL image to numpy array
+            text_array = np.array(text_img.convert('RGB'))
+            text_h, text_w = text_array.shape[:2]
             
-            return txt_clip
+            # Create video clip from text image
+            def make_text_frame(t):
+                # Apply fade effect
+                if t < 0.5:
+                    alpha = t / 0.5
+                elif t > title_duration - 0.5:
+                    alpha = (title_duration - t) / 0.5
+                else:
+                    alpha = 1.0
+                
+                # Create frame with text (apply alpha blending)
+                frame = np.zeros((text_h, text_w, 3), dtype=np.uint8)
+                # Blend text with black background using alpha
+                frame[:, :] = (text_array * alpha).astype(np.uint8)
+                return frame
+            
+            txt_clip = VideoClip(make_text_frame, duration=title_duration)
+            txt_clip = txt_clip.set_fps(self.fps)
+            txt_clip = txt_clip.set_position(('center', 150))
+            
+            # Animated background for title
+            def make_title_bg(t):
+                try:
+                    # Pulsing effect
+                    brightness = int(100 + 50 * np.sin(t * 2))
+                    brightness = max(50, min(150, brightness))
+                    img = Image.new('RGB', (self.width, 200), (brightness, brightness, brightness))
+                    return np.array(img)
+                except:
+                    return np.zeros((200, self.width, 3), dtype=np.uint8)
+
+            title_bg = VideoClip(make_title_bg, duration=title_duration)
+            title_bg = title_bg.set_fps(self.fps)
+            title_bg = title_bg.set_position((0, 100))
+            
+            return CompositeVideoClip([title_bg, txt_clip])
+            
         except Exception as e:
-            logger.warning(f"Could not create title card: {e}")
-            # Return empty clip if title creation fails
-            return ColorClip(size=(1, 1), color=(0,0,0)).with_duration(duration).with_opacity(0)  # Changed: set_opacity → with_opacity
+            logger.warning(f"Could not create animated title: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
     
     def _create_animated_subtitles(
         self,
         text: str,
         duration: float
-    ) -> List[TextClip]:
-        """Create animated subtitle text"""
-        # Split text into chunks (words)
-        words = text.split()
-        words_per_chunk = 6  # Show 6 words at a time
+    ) -> List[VideoClip]:
+        """Create animated subtitles with smooth transitions using PIL"""
+        if not text or not text.strip():
+            return []
         
+        words = text.split()
+        if not words:
+            return []
+        
+        words_per_chunk = 6
         clips = []
-        num_chunks = (len(words) + words_per_chunk - 1) // words_per_chunk
-        chunk_duration = duration / num_chunks if num_chunks > 0 else duration
+        num_chunks = max(1, (len(words) + words_per_chunk - 1) // words_per_chunk)
+        chunk_duration = max(0.5, duration / num_chunks)
         
         for i in range(num_chunks):
             start_idx = i * words_per_chunk
             end_idx = min(start_idx + words_per_chunk, len(words))
             chunk_text = ' '.join(words[start_idx:end_idx])
             
+            if not chunk_text.strip():
+                continue
+            
             try:
-                # Create text clip for this chunk
-                txt_clip = TextClip(
-                    text=chunk_text,  # Changed: txt → text
-                    font_size=60,  # Changed: fontsize → font_size
-                    color='white',
-                    font='Arial-Bold',
-                    stroke_color='black',
-                    stroke_width=2,
-                    size=(self.width - 100, None),
-                    method='caption'
+                # Create text image using PIL
+                text_img = self._create_text_image(
+                    chunk_text,
+                    width=self.width - 120,
+                    font_size=65,
+                    color=(255, 255, 255),
+                    stroke_color=(0, 0, 0),
+                    stroke_width=3
                 )
                 
-                # Position at bottom third
-                txt_clip = txt_clip.with_position(('center', self.height * 0.7))  # Changed: set_position → with_position
+                # Convert to RGB array
+                text_array = np.array(text_img.convert('RGB'))
+                text_h, text_w = text_array.shape[:2]
                 
-                # Set timing
+                # Create semi-transparent background box
+                bg_width = min(text_w + 40, self.width - 40)
+                bg_height = text_h + 30
+                
+                def make_text_bg(t):
+                    try:
+                        # Create RGB image with dark background
+                        img = Image.new('RGB', (bg_width, bg_height), (0, 0, 0))
+                        return np.array(img)
+                    except:
+                        return np.zeros((bg_height, bg_width, 3), dtype=np.uint8)
+                
+                def make_text_frame(t):
+                    try:
+                        # t is relative to clip start (0 to chunk_duration)
+                        # Calculate fade
+                        fade_duration = min(0.3, chunk_duration / 3)
+                        
+                        if i > 0 and t < fade_duration:
+                            # Fade in for non-first chunks
+                            alpha = t / fade_duration
+                        elif i < num_chunks - 1 and t > chunk_duration - fade_duration:
+                            # Fade out for non-last chunks
+                            alpha = (chunk_duration - t) / fade_duration
+                        else:
+                            # Full opacity
+                            alpha = 1.0
+                        
+                        # Apply alpha to text
+                        frame = np.zeros((text_h, text_w, 3), dtype=np.uint8)
+                        frame[:, :] = (text_array * alpha).astype(np.uint8)
+                        return frame
+                    except Exception as e:
+                        logger.warning(f"Error creating text frame: {e}")
+                        return np.zeros((text_h, text_w, 3), dtype=np.uint8)
+                
+                text_bg = VideoClip(make_text_bg, duration=chunk_duration)
+                text_bg = text_bg.set_fps(self.fps)
+                text_bg = text_bg.set_position(('center', int(self.height * 0.72)))
+                
+                # Create text clip
+                txt_clip = VideoClip(make_text_frame, duration=chunk_duration)
+                txt_clip = txt_clip.set_fps(self.fps)
+                txt_clip = txt_clip.set_position(('center', int(self.height * 0.73)))
+                
+                # Timing
                 start_time = i * chunk_duration
-                txt_clip = txt_clip.with_start(start_time)  # Changed: set_start → with_start
-                txt_clip = txt_clip.with_duration(chunk_duration)  # Changed: set_duration → with_duration
+                txt_clip = txt_clip.set_start(start_time).set_duration(chunk_duration)
+                text_bg = text_bg.set_start(start_time).set_duration(chunk_duration)
                 
-                # Add fade transitions
-                if i > 0:  # Not first chunk
-                    txt_clip = txt_clip.crossfadein(0.2)
-                if i < num_chunks - 1:  # Not last chunk
-                    txt_clip = txt_clip.crossfadeout(0.2)
-                
-                clips.append(txt_clip)
+                clips.extend([text_bg, txt_clip])
                 
             except Exception as e:
                 logger.warning(f"Could not create subtitle chunk {i}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 continue
         
         return clips
     
-    def _create_waveform_placeholder(self, duration: float) -> ColorClip:
-        """Create a placeholder for waveform (simplified version)"""
-        # For now, just create a semi-transparent bar
-        # Full waveform visualization is complex and can be added later
-        waveform = ColorClip(
-            size=(self.width - 200, 150),
-            color=self.accent_color
-        ).with_duration(duration)  # Changed: set_duration → with_duration
-        
-        waveform = waveform.with_opacity(0.3)  # Changed: set_opacity → with_opacity
-        waveform = waveform.with_position(('center', self.height * 0.45))  # Changed: set_position → with_position
-        
-        return waveform
+    def _create_decorations(self, duration: float) -> Optional[VideoClip]:
+        """Create animated decorative elements"""
+        try:
+            def make_frame(t):
+                try:
+                    # Create RGB image (no alpha for compositing)
+                    img = Image.new('RGB', (self.width, self.height), (0, 0, 0))
+                    draw = ImageDraw.Draw(img)
+                    
+                    # Animated circles
+                    for i in range(3):
+                        # Moving circles
+                        angle = (t * 0.5 + i * 2.1) % (2 * np.pi)
+                        x = int(self.width / 2 + 400 * np.cos(angle))
+                        y = int(300 + 200 * np.sin(angle * 1.5))
+                        
+                        radius = 20 + int(10 * np.sin(t * 2 + i))
+                        radius = max(5, min(50, radius))  # Clamp radius
+                        
+                        # Vary intensity instead of opacity
+                        intensity = int(100 + 50 * np.sin(t * 3 + i))
+                        intensity = max(50, min(150, intensity))
+                        
+                        # Scale color by intensity
+                        r = int(self.accent_color[0] * intensity / 255)
+                        g = int(self.accent_color[1] * intensity / 255)
+                        b = int(self.accent_color[2] * intensity / 255)
+                        
+                        # Draw circle
+                        draw.ellipse(
+                            [x - radius, y - radius, x + radius, y + radius],
+                            fill=(r, g, b)
+                        )
+                    
+                    return np.array(img)
+                except Exception as e:
+                    logger.warning(f"Error creating decoration frame at t={t}: {e}")
+                    return np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            
+            decoration_clip = VideoClip(make_frame, duration=duration)
+            decoration_clip = decoration_clip.set_fps(self.fps)
+            return decoration_clip
+        except Exception as e:
+            logger.warning(f"Failed to create decorations: {e}")
+            return None
     
-    def create_multiple_highlights(
-        self,
-        audio_path: str,
-        highlights: List[Dict],
-        output_dir: str,
-        title_prefix: str = "Highlight"
-    ) -> List[str]:
-        """
-        Create videos for multiple highlights
-        
-        Returns:
-            List of paths to generated videos
-        """
-        output_paths = []
-        
-        for i, highlight in enumerate(highlights):
-            try:
-                output_path = os.path.join(output_dir, f"highlight_{i+1}.mp4")
-                title = f"{title_prefix} #{i+1}"
-                
-                video_path = self.create_highlight_video(
-                    audio_path=audio_path,
-                    highlight=highlight,
-                    output_path=output_path,
-                    title=title
-                )
-                
-                output_paths.append(video_path)
-                logger.info(f"Generated highlight {i+1}/{len(highlights)}")
-                
-            except Exception as e:
-                logger.error(f"Failed to generate highlight {i+1}: {str(e)}")
-                continue
-        
-        return output_paths
-
-# Singleton instance
+# Singleton
 _video_generator = None
 
-def get_video_generator() -> VideoGenerator:
-    """Get or create video generator instance"""
+def get_video_generator():
     global _video_generator
     if _video_generator is None:
         _video_generator = VideoGenerator()

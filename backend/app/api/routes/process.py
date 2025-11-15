@@ -20,6 +20,7 @@ logger = logging.getLogger("app.api.routes.process")
 
 async def process_audio_task(job_id: str, audio_path: str):
     """Background task to process audio and generate videos"""
+    logger.info(f"[{job_id}] ===== PROCESSING TASK STARTED =====")
     try:
         job_dir = Path(settings.UPLOAD_DIR) / job_id
         output_dir = Path(settings.OUTPUT_DIR) / job_id
@@ -33,10 +34,13 @@ async def process_audio_task(job_id: str, audio_path: str):
         }
         
         transcription_service = get_transcription_service()
+        logger.info(f"[{job_id}] Starting transcription...")
         transcript = transcription_service.transcribe_audio(audio_path)
+        logger.info(f"[{job_id}] Transcription complete: {len(transcript.get('segments', []))} segments")
         
         # Save transcript
         transcript_file = job_dir / "transcript.json"
+        logger.info(f"[{job_id}] Saving transcript to {transcript_file}")
         with open(transcript_file, "w", encoding="utf-8") as f:
             json.dump({
                 "text": transcript["text"],
@@ -46,6 +50,7 @@ async def process_audio_task(job_id: str, audio_path: str):
             }, f, indent=2, ensure_ascii=False)
         
         # Stage 2: Analyzing (50-65%)
+        logger.info(f"[{job_id}] Starting highlight detection...")
         job_statuses[job_id] = {
             "status": ProcessingStatus.ANALYZING,
             "progress": 55,
@@ -57,9 +62,11 @@ async def process_audio_task(job_id: str, audio_path: str):
             transcript["segments"],
             num_highlights=3
         )
+        logger.info(f"[{job_id}] Highlight detection complete: {len(highlights)} highlights found")
         
         # Save highlights
         highlights_file = job_dir / "highlights.json"
+        logger.info(f"[{job_id}] Saving highlights to {highlights_file}")
         with open(highlights_file, "w", encoding="utf-8") as f:
             json.dump({
                 "highlights": highlights,
@@ -67,6 +74,7 @@ async def process_audio_task(job_id: str, audio_path: str):
             }, f, indent=2, ensure_ascii=False)
         
         # Stage 3: Generating Videos (65-95%)
+        logger.info(f"[{job_id}] Starting video generation for {len(highlights)} highlights...")
         job_statuses[job_id] = {
             "status": ProcessingStatus.GENERATING,
             "progress": 65,
@@ -76,36 +84,45 @@ async def process_audio_task(job_id: str, audio_path: str):
         video_generator = get_video_generator()
         video_paths = []
         
-        for i, highlight in enumerate(highlights):
-            try:
-                # Update progress for each video
-                progress = 65 + (i * 10)  # 65%, 75%, 85%
-                job_statuses[job_id] = {
-                    "status": ProcessingStatus.GENERATING,
-                    "progress": progress,
-                    "message": f"Generating video {i+1} of {len(highlights)}..."
-                }
-                
-                video_path = output_dir / f"highlight_{i+1}.mp4"
-                
-                video_generator.create_highlight_video(
-                    audio_path=audio_path,
-                    highlight=highlight,
-                    output_path=str(video_path),
-                    title=f"Podcast Highlight #{i+1}"
-                )
-                
-                # Store relative path for frontend
-                video_paths.append(f"/outputs/{job_id}/highlight_{i+1}.mp4")
-                
-                logger.info(f"Generated video {i+1}/{len(highlights)}")
-                
-            except Exception as e:
-                logger.error(f"Failed to generate video {i+1}: {str(e)}")
-                # Continue with other videos even if one fails
-                continue
+        if not highlights:
+            logger.warning(f"[{job_id}] No highlights found, skipping video generation")
+        else:
+            for i, highlight in enumerate(highlights):
+                try:
+                    # Update progress for each video
+                    progress = 65 + (i * 10)  # 65%, 75%, 85%
+                    logger.info(f"[{job_id}] Generating video {i+1}/{len(highlights)} (progress: {progress}%)")
+                    job_statuses[job_id] = {
+                        "status": ProcessingStatus.GENERATING,
+                        "progress": progress,
+                        "message": f"Generating video {i+1} of {len(highlights)}..."
+                    }
+                    
+                    video_path = output_dir / f"highlight_{i+1}.mp4"
+                    logger.info(f"[{job_id}] Video {i+1} - Highlight: {highlight.get('start_time', 0):.1f}s to {highlight.get('end_time', 0):.1f}s")
+                    
+                    video_generator.create_highlight_video(
+                        audio_path=audio_path,
+                        highlight=highlight,
+                        output_path=str(video_path),
+                        title=f"Podcast Highlight #{i+1}"
+                    )
+                    
+                    # Store relative path for frontend
+                    video_paths.append(f"/outputs/{job_id}/highlight_{i+1}.mp4")
+                    
+                    logger.info(f"[{job_id}] Successfully generated video {i+1}/{len(highlights)}")
+                    
+                except Exception as e:
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    logger.error(f"[{job_id}] Failed to generate video {i+1}: {str(e)}")
+                    logger.error(f"[{job_id}] Error traceback: {error_trace}")
+                    # Continue with other videos even if one fails
+                    continue
         
         # Stage 4: Complete (100%)
+        logger.info(f"[{job_id}] Processing complete! Generated {len(video_paths)} videos")
         job_statuses[job_id] = {
             "status": ProcessingStatus.COMPLETED,
             "progress": 100,
@@ -115,7 +132,7 @@ async def process_audio_task(job_id: str, audio_path: str):
             "video_urls": video_paths  # List of generated videos
         }
         
-        logger.info(f"Job {job_id} completed successfully with {len(video_paths)} videos")
+        logger.info(f"[{job_id}] Job completed successfully with {len(video_paths)} videos")
         
     except Exception as e:
         import traceback

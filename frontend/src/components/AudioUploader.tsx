@@ -53,9 +53,20 @@ export default function AudioUploader({ onUploadComplete }: AudioUploaderProps) 
     try {
       const response = await uploadAudio(selectedFile);
       onUploadComplete(response);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Upload failed:', error);
-      alert('Upload failed. Please try again.');
+      
+      // Extract error message from response
+      let errorMessage = 'Upload failed. Please try again.';
+      if (error?.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      } else if (error?.response?.status === 0) {
+        errorMessage = 'Cannot connect to server. Please make sure the backend is running.';
+      }
+      
+      alert(errorMessage);
     } finally {
       setIsUploading(false);
     }
