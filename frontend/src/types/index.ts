@@ -14,6 +14,7 @@ export interface Highlight {
   text: string;
   confidence: number;
   reason: string;
+  ai_hook?: string;  // AI-generated viral hook (if enabled)
 }
 
 export interface UploadResponse {

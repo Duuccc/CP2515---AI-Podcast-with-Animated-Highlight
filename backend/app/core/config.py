@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # API Keys (optional for now)
     OPENAI_API_KEY: Optional[str] = None
     
+    # AI Enhancement Features
+    USE_AI_HOOK: bool = True  # Enable GPT-4 hook generation (fast, cheap)
+    USE_AI_BACKGROUND: bool = False  # Enable DALL-E background generation (slower, costs ~$0.04 per video)
+    
     # Redis for task queue (optional for now)
     REDIS_URL: str = "redis://localhost:6379"
     

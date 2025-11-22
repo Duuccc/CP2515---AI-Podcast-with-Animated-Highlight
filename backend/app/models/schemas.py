@@ -28,6 +28,7 @@ class Highlight(BaseModel):
     text: str
     confidence: float
     reason: str
+    ai_hook: Optional[str] = None  # AI-generated viral hook (if enabled)
 
 class ProcessingStatusResponse(BaseModel):
     job_id: str

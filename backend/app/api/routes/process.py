@@ -8,7 +8,6 @@ from app.models.schemas import ProcessRequest, ProcessingStatusResponse, Process
 from app.core.config import settings
 from app.services.transcription import get_transcription_service
 from app.services.highlight_detector import get_highlight_detector
-
 from app.services.video_generator import get_video_generator
 
 router = APIRouter()
@@ -64,9 +63,9 @@ async def process_audio_task(job_id: str, audio_path: str):
         )
         logger.info(f"[{job_id}] Highlight detection complete: {len(highlights)} highlights found")
         
-        # Save highlights
+        # Save initial highlights (will be updated with AI hooks after video generation)
         highlights_file = job_dir / "highlights.json"
-        logger.info(f"[{job_id}] Saving highlights to {highlights_file}")
+        logger.info(f"[{job_id}] Saving initial highlights to {highlights_file}")
         with open(highlights_file, "w", encoding="utf-8") as f:
             json.dump({
                 "highlights": highlights,
@@ -101,12 +100,20 @@ async def process_audio_task(job_id: str, audio_path: str):
                     video_path = output_dir / f"highlight_{i+1}.mp4"
                     logger.info(f"[{job_id}] Video {i+1} - Highlight: {highlight.get('start_time', 0):.1f}s to {highlight.get('end_time', 0):.1f}s")
                     
-                    video_generator.create_highlight_video(
+                    # Generate video and capture AI hook if generated
+                    output_path, ai_hook = video_generator.create_highlight_video(
                         audio_path=audio_path,
                         highlight=highlight,
                         output_path=str(video_path),
-                        title=f"Podcast Highlight #{i+1}"
+                        title=f"Podcast Highlight #{i+1}",
+                        use_ai_hook=settings.USE_AI_HOOK,
+                        use_ai_background=settings.USE_AI_BACKGROUND
                     )
+                    
+                    # Store AI hook in highlight metadata
+                    if ai_hook:
+                        highlight['ai_hook'] = ai_hook
+                        logger.info(f"[{job_id}] Video {i+1} - AI hook: '{ai_hook}'")
                     
                     # Store relative path for frontend
                     video_paths.append(f"/outputs/{job_id}/highlight_{i+1}.mp4")
@@ -123,6 +130,24 @@ async def process_audio_task(job_id: str, audio_path: str):
         
         # Stage 4: Complete (100%)
         logger.info(f"[{job_id}] Processing complete! Generated {len(video_paths)} videos")
+        
+        # Save highlights with AI hooks (if any were generated)
+        logger.info(f"[{job_id}] Saving highlights with AI metadata to {highlights_file}")
+        with open(highlights_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "highlights": highlights,
+                "processed_at": datetime.now().isoformat(),
+                "ai_features_used": {
+                    "hooks": settings.USE_AI_HOOK,
+                    "backgrounds": settings.USE_AI_BACKGROUND
+                }
+            }, f, indent=2, ensure_ascii=False)
+        
+        # Count how many AI hooks were generated
+        ai_hooks_count = sum(1 for h in highlights if h.get('ai_hook'))
+        if settings.USE_AI_HOOK:
+            logger.info(f"[{job_id}] AI hooks generated: {ai_hooks_count}/{len(highlights)}")
+        
         job_statuses[job_id] = {
             "status": ProcessingStatus.COMPLETED,
             "progress": 100,

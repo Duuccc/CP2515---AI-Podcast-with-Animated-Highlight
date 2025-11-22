@@ -132,7 +132,16 @@ export default function HighlightPreview({ status }: HighlightPreviewProps) {
               {/* Video Info */}
               <div className="p-4">
                 <h3 className="font-semibold text-gray-900 mb-2">
-                  Highlight #{index + 1}
+                  {status.highlights && status.highlights[index]?.ai_hook ? (
+                    <span className="flex items-center gap-2">
+                      <span className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-1 rounded text-xs font-bold">
+                        AI
+                      </span>
+                      {status.highlights[index].ai_hook}
+                    </span>
+                  ) : (
+                    `Highlight #${index + 1}`
+                  )}
                 </h3>
                 {status.highlights && status.highlights[index] && (
                   <p className="text-sm text-gray-600 mb-3 line-clamp-2">
@@ -172,6 +181,15 @@ export default function HighlightPreview({ status }: HighlightPreviewProps) {
                     {Math.round((highlight.confidence || 0) * 100)}% confidence
                   </span>
                 </div>
+                {highlight.ai_hook && (
+                  <div className="mb-2 p-2 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-semibold text-purple-700">AI Hook:</span>
+                      <span className="text-xs bg-purple-500 text-white px-1.5 py-0.5 rounded">GPT-4</span>
+                    </div>
+                    <p className="text-sm font-semibold text-purple-900">{highlight.ai_hook}</p>
+                  </div>
+                )}
                 <p className="text-gray-700 mb-2">{highlight.text}</p>
                 {highlight.reason && (
                   <p className="text-xs text-gray-500 italic">{highlight.reason}</p>

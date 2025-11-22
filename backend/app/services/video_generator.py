@@ -10,6 +10,9 @@ from typing import Dict, List, Optional, Tuple
 import os
 import tempfile
 import textwrap
+from app.services.ai_enhancements import get_ai_enhancement_service
+import requests
+from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
@@ -172,14 +175,52 @@ class VideoGenerator:
         
         return img
     
+    def _create_background_from_image(self, pil_image: Image.Image, duration: float) -> VideoClip:
+        """Convert PIL image to animated video clip background"""
+        try:
+            # Resize image to match video dimensions
+            pil_image = pil_image.resize((self.width, self.height), Image.Resampling.LANCZOS)
+            
+            # Convert to numpy array
+            img_array = np.array(pil_image.convert('RGB'))
+            
+            # Ensure correct shape (height, width, 3)
+            if len(img_array.shape) == 2:
+                # Grayscale, convert to RGB
+                img_array = np.stack([img_array, img_array, img_array], axis=2)
+            
+            def make_frame(t):
+                # Optionally add subtle animation (zoom, pan, or fade)
+                # For now, return static frame
+                return img_array
+            
+            clip = VideoClip(make_frame, duration=duration)
+            clip = clip.set_fps(self.fps)
+            return clip
+        except Exception as e:
+            logger.warning(f"Failed to create background from image: {e}")
+            return None
+    
     def create_highlight_video(
         self,
         audio_path: str,
         highlight: Dict,
         output_path: str,
-        title: str = "Podcast Highlight"
-    ) -> str:
-        """Create an animated video with effects"""
+        title: str = "Podcast Highlight",
+        use_ai_hook: bool = True,
+        use_ai_background: bool = False
+    ) -> Tuple[str, Optional[str]]:
+        """
+        Create an animated video with effects
+        
+        Args:
+            audio_path: Path to audio file
+            highlight: Highlight dictionary with text, start_time, end_time
+            output_path: Output video path
+            title: Default title (will be replaced by AI hook if use_ai_hook=True)
+            use_ai_hook: Whether to generate AI hook using GPT-4
+            use_ai_background: Whether to generate background using DALL-E (slower, costs money)
+        """
         audio_clip = None
         final_video = None
         
@@ -205,24 +246,58 @@ class VideoGenerator:
             if duration < 1.0:
                 raise ValueError(f"Audio segment too short: {duration:.2f}s")
             
-            # 2. Create animated background
-            logger.info("🌈 Creating animated background...")
-            background = self._create_animated_gradient(duration)
+            # 2. Generate AI hook (if enabled)
+            video_title = title
+            generated_hook = None
+            if use_ai_hook:
+                try:
+                    ai_service = get_ai_enhancement_service()
+                    hook = ai_service.generate_viral_hook(highlight.get('text', ''))
+                    if hook and hook != "Podcast Highlight":
+                        video_title = hook
+                        generated_hook = hook
+                        logger.info(f"✨ Using AI-generated hook: '{video_title}'")
+                except Exception as e:
+                    logger.warning(f"Failed to generate AI hook, using default: {e}")
+                    video_title = title
+            
+            # 3. Create background (AI or gradient)
+            background = None
+            if use_ai_background:
+                try:
+                    logger.info("🎨 Generating AI background with DALL-E...")
+                    ai_service = get_ai_enhancement_service()
+                    bg_image = ai_service.generate_background_image(
+                        highlight.get('text', ''),
+                        size=f"{self.width}x{self.height}",
+                        quality="standard"
+                    )
+                    if bg_image:
+                        background = self._create_background_from_image(bg_image, duration)
+                        logger.info("✅ Using AI-generated background")
+                except Exception as e:
+                    logger.warning(f"Failed to generate AI background, falling back to gradient: {e}")
+            
+            # Fallback to animated gradient if AI background failed or disabled
+            if background is None:
+                logger.info("🌈 Creating animated gradient background...")
+                background = self._create_animated_gradient(duration)
+            
             background = background.set_fps(self.fps)
             
-            # 3. Create animated waveform
+            # 4. Create animated waveform
             logger.info("📊 Creating waveform...")
             waveform = self._create_animated_waveform(audio_clip, duration)
             if waveform:
                 waveform = waveform.set_fps(self.fps)
             
-            # 4. Create title card with animation
+            # 5. Create title card with animation (using AI hook if generated)
             logger.info("📝 Creating title card...")
-            title_clip = self._create_animated_title(title, duration)
+            title_clip = self._create_animated_title(video_title, duration)
             if title_clip:
                 title_clip = title_clip.set_fps(self.fps)
             
-            # 5. Create animated subtitles
+            # 6. Create animated subtitles
             logger.info("💬 Creating animated subtitles...")
             subtitle_clips = self._create_animated_subtitles(
                 highlight['text'],
@@ -231,13 +306,13 @@ class VideoGenerator:
             for clip in subtitle_clips:
                 clip.set_fps(self.fps)
             
-            # 6. Add decorative elements
+            # 7. Add decorative elements
             logger.info("✨ Adding decorative elements...")
             decorations = self._create_decorations(duration)
             if decorations:
                 decorations = decorations.set_fps(self.fps)
             
-            # 7. Composite all elements
+            # 8. Composite all elements
             logger.info("🎨 Compositing video...")
             all_clips = [background]
             
@@ -259,16 +334,16 @@ class VideoGenerator:
             final_video = final_video.set_duration(duration)
             final_video = final_video.set_fps(self.fps)
             
-            # 8. Add audio
+            # 9. Add audio
             if audio_clip:
                 final_video = final_video.set_audio(audio_clip)
             
-            # 9. Add fade in/out
+            # 10. Add fade in/out
             logger.info("🎭 Adding transitions...")
             fade_duration = min(0.5, duration / 4)  # Don't fade more than 25% of video
             final_video = final_video.fadein(fade_duration).fadeout(fade_duration)
             
-            # 10. Export
+            # 11. Export
             logger.info(f"💾 Exporting to: {output_path}")
             temp_audio_path = os.path.join(tempfile.gettempdir(), f'temp-audio-{os.getpid()}.m4a')
             
@@ -289,7 +364,7 @@ class VideoGenerator:
             file_size = os.path.getsize(output_path)
             logger.info(f"✅ Video created: {file_size:,} bytes ({file_size / 1024 / 1024:.2f} MB)")
             
-            return output_path
+            return output_path, generated_hook
             
         except Exception as e:
             logger.error(f"❌ Video generation failed: {str(e)}")

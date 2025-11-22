@@ -47,7 +47,8 @@ def _reconstruct_status_from_files(job_id: str) -> dict:
                                     end_time=h.get("end_time", 0.0),
                                     text=h.get("text", ""),
                                     confidence=h.get("confidence", 0.0),
-                                    reason=h.get("reason", "Selected as highlight")
+                                    reason=h.get("reason", "Selected as highlight"),
+                                    ai_hook=h.get("ai_hook")  # Include AI hook if available
                                 )
                                 highlights.append(highlight)
                         logger.info(f"Loaded {len(highlights)} highlights from file")
@@ -120,7 +121,8 @@ async def get_job_status(job_id: str):
                             end_time=h.get("end_time", 0.0),
                             text=h.get("text", ""),
                             confidence=h.get("confidence", 0.0),
-                            reason=h.get("reason", "Selected as highlight")
+                            reason=h.get("reason", "Selected as highlight"),
+                            ai_hook=h.get("ai_hook")  # Include AI hook if available
                         )
                         highlights.append(highlight)
                     else:
