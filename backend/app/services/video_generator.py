@@ -72,7 +72,7 @@ class VideoGenerator:
         stroke_color: Tuple[int, int, int] = (0, 0, 0),
         stroke_width: int = 3
     ) -> Image.Image:
-        """Create a PIL image with text rendered"""
+        """Create a PIL image with text rendered on transparent background"""
         # Load font
         font = None
         if self.font_path:
@@ -93,71 +93,80 @@ class VideoGenerator:
         wrapped_lines = textwrap.wrap(text, width=max_chars_per_line)
         
         # Calculate text dimensions
+        line_height = font_size
         if font:
             # Get text dimensions
             bbox = None
             for line in wrapped_lines:
                 try:
                     bbox = font.getbbox(line)
-                    break
+                    if bbox:
+                        line_height = bbox[3] - bbox[1] if len(bbox) == 4 else font_size
+                        break
                 except:
                     # Fallback if getbbox not available
                     try:
                         bbox = font.getsize(line)
-                        bbox = (0, 0, bbox[0], bbox[1])
+                        line_height = bbox[1] if len(bbox) >= 2 else font_size
+                        break
                     except:
                         pass
             
-            if bbox:
-                line_height = bbox[3] - bbox[1] if len(bbox) == 4 else font_size
-            else:
-                line_height = font_size
-        else:
-            line_height = font_size
-        
-        text_height = len(wrapped_lines) * (line_height + 10)
-        text_width = width - 40
+        text_height = len(wrapped_lines) * (line_height + 10) + 20
+        text_width = width
         
         # Create image with transparent background
         img = Image.new('RGBA', (text_width, text_height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         
         # Draw text with stroke
-        y_offset = 0
+        y_offset = 10
         for line in wrapped_lines:
+            # Calculate text width for centering
+            if font:
+                try:
+                    if hasattr(font, 'getbbox'):
+                        bbox = font.getbbox(line)
+                        line_width = bbox[2] - bbox[0]
+                    else:
+                        line_width = font.getsize(line)[0]
+                except:
+                    line_width = len(line) * font_size // 2
+            else:
+                line_width = len(line) * font_size // 2
+            
+            x_offset = (text_width - line_width) // 2
+            
             if font:
                 # Draw stroke (outline)
                 if stroke_width > 0:
-                    for adj in range(-stroke_width, stroke_width + 1):
-                        for adj2 in range(-stroke_width, stroke_width + 1):
-                            if adj != 0 or adj2 != 0:
+                    for dx in [-stroke_width, 0, stroke_width]:
+                        for dy in [-stroke_width, 0, stroke_width]:
+                            if dx != 0 or dy != 0:
                                 try:
                                     draw.text(
-                                        (20 + adj, y_offset + adj2),
+                                        (x_offset + dx, y_offset + dy),
                                         line,
                                         font=font,
                                         fill=stroke_color
                                     )
                                 except:
-                                    draw.text(
-                                        (20 + adj, y_offset + adj2),
-                                        line,
-                                        fill=stroke_color
-                                    )
+                                    pass
                 
                 # Draw main text
                 try:
-                    draw.text((20, y_offset), line, font=font, fill=color)
+                    draw.text((x_offset, y_offset), line, font=font, fill=color)
                 except:
-                    draw.text((20, y_offset), line, fill=color)
+                    draw.text((x_offset, y_offset), line, fill=color)
+
             else:
                 # Fallback without font
                 if stroke_width > 0:
-                    for adj in range(-stroke_width, stroke_width + 1):
-                        for adj2 in range(-stroke_width, stroke_width + 1):
-                            if adj != 0 or adj2 != 0:
-                                draw.text((20 + adj, y_offset + adj2), line, fill=stroke_color)
-                draw.text((20, y_offset), line, fill=color)
+                    for dx in [-stroke_width, 0, stroke_width]:
+                        for dy in [-stroke_width, 0, stroke_width]:
+                            if dx != 0 or dy != 0:
+                                draw.text((x_offset + dx, y_offset + dy), line, fill=stroke_color)
+                draw.text((x_offset, y_offset), line, fill=color)
             
             y_offset += line_height + 10
         
@@ -334,37 +343,41 @@ class VideoGenerator:
             raise Exception(f"Failed to extract audio segment: {str(e)}")
     
     def _create_animated_gradient(self, duration: float) -> VideoClip:
-        """Create animated gradient background"""
+        """Create animated gradient background using numpy for efficiency"""
         def make_frame(t):
             try:
                 # Animate gradient position
-                offset = int((t / duration) * 200) % 200
-
-                # Create RGB image directly (no alpha needed for background)
-                img = Image.new('RGB', (self.width, self.height))
-                pixels = img.load()
-
-                for y in range(self.height):
-                    # Animated gradient
-                    progress = ((y + offset) % (self.height * 2)) / (self.height * 2)
-                    progress = min(1.0, max(0.0, progress))  # Clamp to [0, 1]
-
-                    r = int(self.bg_color_start[0] + (self.bg_color_end[0] - self.bg_color_start[0]) * progress)
-                    g = int(self.bg_color_start[1] + (self.bg_color_end[1] - self.bg_color_start[1]) * progress)
-                    b = int(self.bg_color_start[2] + (self.bg_color_end[2] - self.bg_color_start[2]) * progress)
-
-                    # Clamp color values
-                    r = max(0, min(255, r))
-                    g = max(0, min(255, g))
-                    b = max(0, min(255, b))
-
-                    # Draw horizontal line
-                    for x in range(self.width):
-                        pixels[x, y] = (r, g, b)
-
-                return np.array(img)
+                offset = (t / duration * 200) % 200
+                
+                # Create gradient using numpy (much faster)
+                y_coords = np.arange(self.height, dtype=np.float32)
+                # Create progress array from 0 to 1, cycling with offset
+                progress = ((y_coords + offset) % (self.height * 2)) / (self.height * 2)
+                progress = np.clip(progress, 0.0, 1.0)
+                
+                # Interpolate colors for each row
+                r = (self.bg_color_start[0] + (self.bg_color_end[0] - self.bg_color_start[0]) * progress).astype(np.uint8)
+                g = (self.bg_color_start[1] + (self.bg_color_end[1] - self.bg_color_start[1]) * progress).astype(np.uint8)
+                b = (self.bg_color_start[2] + (self.bg_color_end[2] - self.bg_color_start[2]) * progress).astype(np.uint8)
+                
+                # Reshape to column vectors
+                r = r.reshape(-1, 1)
+                g = g.reshape(-1, 1)
+                b = b.reshape(-1, 1)
+                
+                # Repeat across width and stack into RGB
+                r = np.tile(r, (1, self.width))
+                g = np.tile(g, (1, self.width))
+                b = np.tile(b, (1, self.width))
+                
+                # Stack into RGB image (height, width, 3)
+                frame = np.stack([r, g, b], axis=2)
+                
+                return frame
             except Exception as e:
                 logger.warning(f"Error creating gradient frame at t={t}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 # Return solid color as fallback
                 return np.full((self.height, self.width, 3), self.bg_color_start, dtype=np.uint8)
         
@@ -420,7 +433,7 @@ class VideoGenerator:
             logger.warning(f"Failed to create waveform: {e}")
             return None
     
-    def _create_animated_title(self, title: str, duration: float) -> Optional[CompositeVideoClip]:
+    def _create_animated_title(self, title: str, duration: float) -> Optional[VideoClip]:
         """Create animated title with effects using PIL"""
         try:
             title_duration = min(3.0, duration * 0.3)
@@ -438,45 +451,57 @@ class VideoGenerator:
             )
             
             # Convert PIL image to numpy array
-            text_array = np.array(text_img.convert('RGB'))
-            text_h, text_w = text_array.shape[:2]
+            # Note: PIL size is (width, height), but numpy array is (height, width, channels)
+            text_w, text_h = text_img.size  # PIL format: (width, height)
             
             # Create video clip from text image
             def make_text_frame(t):
-                # Apply fade effect
-                if t < 0.5:
-                    alpha = t / 0.5
-                elif t > title_duration - 0.5:
-                    alpha = (title_duration - t) / 0.5
-                else:
-                    alpha = 1.0
-                
-                # Create frame with text (apply alpha blending)
-                frame = np.zeros((text_h, text_w, 3), dtype=np.uint8)
-                # Blend text with black background using alpha
-                frame[:, :] = (text_array * alpha).astype(np.uint8)
-                return frame
+                try:
+                    # Apply fade effect
+                    if t < 0.5:
+                        alpha = t / 0.5
+                    elif t > title_duration - 0.5:
+                        alpha = (title_duration - t) / 0.5
+                    else:
+                        alpha = 1.0
+                    
+                    # Convert RGBA to RGB with alpha blending
+                    # Use transparent background so text shows on gradient
+                    if text_img.mode == 'RGBA':
+                        # Get RGBA array (numpy format: height, width, channels)
+                        rgba_array = np.array(text_img)
+                        # numpy array shape is (height, width, channels)
+                        rgb = rgba_array[:, :, :3].astype(np.float32)
+                        alpha_channel = rgba_array[:, :, 3:4].astype(np.float32) / 255.0
+                        # Create transparent background (numpy format: height, width, channels)
+                        frame = np.zeros((rgba_array.shape[0], rgba_array.shape[1], 3), dtype=np.uint8)
+                        # Blend text on transparent background
+                        frame = (frame * (1 - alpha_channel) + rgb * alpha_channel).astype(np.uint8)
+                        # Apply overall fade
+                        frame = (frame * alpha).astype(np.uint8)
+                    else:
+                        # Already RGB
+                        frame = np.array(text_img.convert('RGB'))
+                        frame = (frame * alpha).astype(np.uint8)
+                    
+                    return frame
+                except Exception as e:
+                    logger.warning(f"Error creating title frame at t={t}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    # Return correct shape based on image
+                    if text_img.mode == 'RGBA':
+                        rgba_array = np.array(text_img)
+                        return np.zeros((rgba_array.shape[0], rgba_array.shape[1], 3), dtype=np.uint8)
+                    else:
+                        rgb_array = np.array(text_img.convert('RGB'))
+                        return np.zeros_like(rgb_array)
             
             txt_clip = VideoClip(make_text_frame, duration=title_duration)
             txt_clip = txt_clip.set_fps(self.fps)
-            txt_clip = txt_clip.set_position(('center', 150))
+            txt_clip = txt_clip.set_position(('center', 100))
             
-            # Animated background for title
-            def make_title_bg(t):
-                try:
-                    # Pulsing effect
-                    brightness = int(100 + 50 * np.sin(t * 2))
-                    brightness = max(50, min(150, brightness))
-                    img = Image.new('RGB', (self.width, 200), (brightness, brightness, brightness))
-                    return np.array(img)
-                except:
-                    return np.zeros((200, self.width, 3), dtype=np.uint8)
-
-            title_bg = VideoClip(make_title_bg, duration=title_duration)
-            title_bg = title_bg.set_fps(self.fps)
-            title_bg = title_bg.set_position((0, 100))
-            
-            return CompositeVideoClip([title_bg, txt_clip])
+            return txt_clip
             
         except Exception as e:
             logger.warning(f"Could not create animated title: {e}")
@@ -521,9 +546,8 @@ class VideoGenerator:
                     stroke_width=3
                 )
                 
-                # Convert to RGB array
-                text_array = np.array(text_img.convert('RGB'))
-                text_h, text_w = text_array.shape[:2]
+                # Note: PIL size is (width, height), but numpy array is (height, width, channels)
+                text_w, text_h = text_img.size  # PIL format: (width, height)
                 
                 # Create semi-transparent background box
                 bg_width = min(text_w + 40, self.width - 40)
@@ -531,7 +555,8 @@ class VideoGenerator:
                 
                 def make_text_bg(t):
                     try:
-                        # Create RGB image with dark background
+                        # Create RGB image with semi-transparent dark background
+                        # Use dark gray to simulate transparency
                         img = Image.new('RGB', (bg_width, bg_height), (0, 0, 0))
                         return np.array(img)
                     except:
@@ -553,13 +578,36 @@ class VideoGenerator:
                             # Full opacity
                             alpha = 1.0
                         
-                        # Apply alpha to text
-                        frame = np.zeros((text_h, text_w, 3), dtype=np.uint8)
-                        frame[:, :] = (text_array * alpha).astype(np.uint8)
+                        # Convert RGBA to RGB with proper alpha handling
+                        if text_img.mode == 'RGBA':
+                            # Get RGBA array (numpy format: height, width, channels)
+                            rgba_array = np.array(text_img)
+                            # numpy array shape is (height, width, channels)
+                            rgb = rgba_array[:, :, :3].astype(np.float32)
+                            alpha_channel = rgba_array[:, :, 3:4].astype(np.float32) / 255.0
+                            # Create transparent background (numpy format: height, width, channels)
+                            frame = np.zeros((rgba_array.shape[0], rgba_array.shape[1], 3), dtype=np.uint8)
+                            # Blend text on transparent (black) background
+                            frame = (frame * (1 - alpha_channel) + rgb * alpha_channel).astype(np.uint8)
+                            # Apply fade
+                            frame = (frame * alpha).astype(np.uint8)
+                        else:
+                            # Already RGB
+                            text_array = np.array(text_img.convert('RGB'))
+                            frame = (text_array * alpha).astype(np.uint8)
+
                         return frame
                     except Exception as e:
                         logger.warning(f"Error creating text frame: {e}")
-                        return np.zeros((text_h, text_w, 3), dtype=np.uint8)
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        # Return correct shape based on image
+                        if text_img.mode == 'RGBA':
+                            rgba_array = np.array(text_img)
+                            return np.zeros((rgba_array.shape[0], rgba_array.shape[1], 3), dtype=np.uint8)
+                        else:
+                            rgb_array = np.array(text_img.convert('RGB'))
+                            return np.zeros_like(rgb_array)
                 
                 text_bg = VideoClip(make_text_bg, duration=chunk_duration)
                 text_bg = text_bg.set_fps(self.fps)

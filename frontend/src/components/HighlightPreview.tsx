@@ -1,17 +1,28 @@
 'use client';
 
-import { Download, Play, ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { Download, Play, ExternalLink, AlertCircle, Loader2 } from 'lucide-react';
 import { ProcessingStatusResponse } from '@/types';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface HighlightPreviewProps {
   status: ProcessingStatusResponse;
 }
 
 export default function HighlightPreview({ status }: HighlightPreviewProps) {
+  const [loadingVideos, setLoadingVideos] = useState<Set<number>>(new Set());
+  const [videoErrors, setVideoErrors] = useState<Set<number>>(new Set());
+
+  // Debug: Log the status to see what we're receiving
+  console.log('HighlightPreview - Status:', status);
+  console.log('HighlightPreview - Video URLs:', status.video_urls);
+  console.log('HighlightPreview - Highlights:', status.highlights);
+
   const handleDownload = (videoUrl: string, index: number) => {
     // Create download link
     const link = document.createElement('a');
-    link.href = `http://localhost:8000${videoUrl}`;
+    link.href = `${API_URL}${videoUrl}`;
     link.download = `highlight_${index + 1}.mp4`;
     document.body.appendChild(link);
     link.click();
@@ -26,12 +37,32 @@ export default function HighlightPreview({ status }: HighlightPreviewProps) {
     }
   };
 
+  // Check if we have videos or highlights
+  const hasVideos = status.video_urls && status.video_urls.length > 0;
+  const hasHighlights = status.highlights && status.highlights.length > 0;
+
   return (
     <div className="w-full max-w-4xl mx-auto">
       <h2 className="text-3xl font-bold text-gray-900 mb-6">Your Highlight Videos</h2>
 
+      {/* Error or Empty State */}
+      {!hasVideos && !hasHighlights && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-6 h-6 text-yellow-600" />
+            <div>
+              <h3 className="font-semibold text-yellow-900">No highlights found</h3>
+              <p className="text-sm text-yellow-700">
+                The processing completed but no highlight videos were generated. 
+                This might happen if the audio was too short or no interesting segments were detected.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Video Grid */}
-      {status.video_urls && status.video_urls.length > 0 && (
+      {hasVideos && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {status.video_urls.map((videoUrl, index) => (
             <div
@@ -40,19 +71,62 @@ export default function HighlightPreview({ status }: HighlightPreviewProps) {
             >
               {/* Video Player */}
               <div className="bg-gray-900 aspect-[9/16] relative group">
-                <video
-                  controls
-                  className="w-full h-full object-contain"
-                  src={`http://localhost:8000${videoUrl}`}
-                  preload="metadata"
-                >
-                  Your browser does not support video playback.
-                </video>
+                {loadingVideos.has(index) && (
+                  <div className="absolute inset-0 flex items-center justify-center z-10">
+                    <Loader2 className="w-12 h-12 text-white animate-spin" />
+                  </div>
+                )}
+                {videoErrors.has(index) ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
+                    <div className="text-center text-white p-4">
+                      <AlertCircle className="w-12 h-12 mx-auto mb-2 text-red-400" />
+                      <p className="text-sm">Video failed to load</p>
+                      <a
+                        href={`${API_URL}${videoUrl}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:underline text-xs mt-2 inline-block"
+                      >
+                        Open in new tab
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <video
+                    controls
+                    className="w-full h-full object-contain"
+                    src={`${API_URL}${videoUrl}`}
+                    preload="metadata"
+                    playsInline
+                    onLoadStart={() => {
+                      setLoadingVideos(prev => new Set(prev).add(index));
+                    }}
+                    onCanPlay={() => {
+                      setLoadingVideos(prev => {
+                        const newSet = new Set(prev);
+                        newSet.delete(index);
+                        return newSet;
+                      });
+                    }}
+                    onError={() => {
+                      setLoadingVideos(prev => {
+                        const newSet = new Set(prev);
+                        newSet.delete(index);
+                        return newSet;
+                      });
+                      setVideoErrors(prev => new Set(prev).add(index));
+                    }}
+                  >
+                    Your browser does not support video playback.
+                  </video>
+                )}
                 
                 {/* Overlay on hover */}
-                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                  <Play className="w-16 h-16 text-white" />
-                </div>
+                {!videoErrors.has(index) && (
+                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
+                    <Play className="w-16 h-16 text-white" />
+                  </div>
+                )}
               </div>
 
               {/* Video Info */}
@@ -81,40 +155,54 @@ export default function HighlightPreview({ status }: HighlightPreviewProps) {
       )}
 
       {/* Highlights Text List */}
-      {status.highlights && status.highlights.length > 0 && (
+      {hasHighlights && (
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
           <h3 className="text-xl font-semibold text-gray-800 mb-4">Highlight Details</h3>
           <div className="space-y-4">
-            {status.highlights.map((highlight, index) => (
+            {status.highlights!.map((highlight, index) => (
               <div
                 key={index}
-                className="p-4 bg-gray-50 rounded-lg border border-gray-200"
+                className="p-4 bg-gray-50 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
               >
                 <div className="flex justify-between items-start mb-2">
                   <span className="text-sm font-medium text-blue-600">
                     {formatTime(highlight.start_time)} - {formatTime(highlight.end_time)}
                   </span>
                   <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-                    {Math.round(highlight.confidence * 100)}% confidence
+                    {Math.round((highlight.confidence || 0) * 100)}% confidence
                   </span>
                 </div>
                 <p className="text-gray-700 mb-2">{highlight.text}</p>
-                <p className="text-xs text-gray-500 italic">{highlight.reason}</p>
+                {highlight.reason && (
+                  <p className="text-xs text-gray-500 italic">{highlight.reason}</p>
+                )}
               </div>
             ))}
           </div>
         </div>
       )}
 
+      {/* Transcript Section */}
+      {status.transcript && (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <h3 className="text-xl font-semibold text-gray-800 mb-4">Full Transcript</h3>
+          <div className="max-h-64 overflow-y-auto">
+            <p className="text-gray-700 whitespace-pre-wrap text-sm leading-relaxed">
+              {status.transcript}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Action Buttons */}
       <div className="flex gap-4">
-        {status.video_urls && status.video_urls.length > 1 && (
+        {hasVideos && status.video_urls!.length > 1 && (
           <button
             onClick={handleDownloadAll}
             className="flex-1 flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
           >
             <Download className="w-5 h-5" />
-            Download All ({status.video_urls.length} videos)
+            Download All ({status.video_urls!.length} videos)
           </button>
         )}
         <button

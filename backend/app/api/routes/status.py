@@ -36,9 +36,25 @@ def _reconstruct_status_from_files(job_id: str) -> dict:
                 try:
                     with open(highlights_file, "r", encoding="utf-8") as f:
                         highlights_data = json.load(f)
-                        highlights = highlights_data.get("highlights", [])
+                        highlights_raw = highlights_data.get("highlights", [])
+                        # Convert to Highlight models if needed
+                        highlights = []
+                        for h in highlights_raw:
+                            # Ensure all required fields are present
+                            if isinstance(h, dict):
+                                highlight = Highlight(
+                                    start_time=h.get("start_time", 0.0),
+                                    end_time=h.get("end_time", 0.0),
+                                    text=h.get("text", ""),
+                                    confidence=h.get("confidence", 0.0),
+                                    reason=h.get("reason", "Selected as highlight")
+                                )
+                                highlights.append(highlight)
+                        logger.info(f"Loaded {len(highlights)} highlights from file")
                 except Exception as e:
                     logger.warning(f"Could not load highlights: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
             
             # Load transcript
             transcript_file = job_dir / "transcript.json"
@@ -93,7 +109,26 @@ async def get_job_status(job_id: str):
         
         # Add additional data if available
         if "highlights" in status_data:
-            response_data["highlights"] = status_data["highlights"]
+            # Convert highlights to Highlight models if they're dicts
+            highlights_raw = status_data["highlights"]
+            if highlights_raw:
+                highlights = []
+                for h in highlights_raw:
+                    if isinstance(h, dict):
+                        highlight = Highlight(
+                            start_time=h.get("start_time", 0.0),
+                            end_time=h.get("end_time", 0.0),
+                            text=h.get("text", ""),
+                            confidence=h.get("confidence", 0.0),
+                            reason=h.get("reason", "Selected as highlight")
+                        )
+                        highlights.append(highlight)
+                    else:
+                        # Already a Highlight model
+                        highlights.append(h)
+                response_data["highlights"] = highlights
+            else:
+                response_data["highlights"] = []
         if "video_urls" in status_data:
             response_data["video_urls"] = status_data["video_urls"]
         if "transcript" in status_data:
