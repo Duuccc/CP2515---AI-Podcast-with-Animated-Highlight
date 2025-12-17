@@ -6,6 +6,7 @@ from PIL import Image
 from io import BytesIO
 from typing import Optional, Dict
 import time
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +17,16 @@ class AIEnhancementService:
     """
     
     def __init__(self):
-        api_key = os.getenv("OPENAI_API_KEY")
+        # Try to get API key from config (which loads from .env) first
+        # Then fall back to environment variable
+        api_key = settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")
         if not api_key:
-            logger.warning("OPENAI_API_KEY not found. AI features will be disabled.")
+            logger.warning("OPENAI_API_KEY not found in config or environment. AI features will be disabled.")
+            logger.warning("Please set OPENAI_API_KEY in your .env file or environment variables.")
             self.client = None
         else:
             self.client = OpenAI(api_key=api_key)
-            logger.info("✅ AI Enhancement Service initialized")
+            logger.info("✅ AI Enhancement Service initialized with API key")
     
     def generate_viral_hook(self, highlight_text: str, max_retries: int = 3) -> str:
         """
@@ -88,7 +92,12 @@ Return ONLY the hook text, nothing else."""
             return hook
             
         except Exception as e:
-            logger.error(f"❌ Failed to generate hook: {str(e)}")
+            error_str = str(e)
+            # Check for quota errors
+            if "429" in error_str or "quota" in error_str.lower() or "insufficient_quota" in error_str.lower():
+                logger.warning("⚠️ OpenAI quota exceeded. Using default hook. Please check your billing at https://platform.openai.com/account/billing")
+            else:
+                logger.error(f"❌ Failed to generate hook: {error_str}")
             return "Podcast Highlight"
     
     def generate_background_image(
@@ -147,9 +156,16 @@ Return ONLY the hook text, nothing else."""
             return image
             
         except Exception as e:
-            logger.error(f"❌ Failed to generate background: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
+            error_str = str(e)
+            # Check for quota errors
+            if "429" in error_str or "quota" in error_str.lower() or "insufficient_quota" in error_str.lower():
+                logger.warning("⚠️ OpenAI quota exceeded. Skipping background generation. Please check your billing at https://platform.openai.com/account/billing")
+            elif "400" in error_str and "size" in error_str.lower():
+                logger.warning("⚠️ Invalid image size for DALL-E. This should be fixed in the code.")
+            else:
+                logger.error(f"❌ Failed to generate background: {error_str}")
+                import traceback
+                logger.error(traceback.format_exc())
             return None
     
     def _extract_keywords(self, text: str) -> str:

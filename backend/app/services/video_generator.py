@@ -10,9 +10,11 @@ from typing import Dict, List, Optional, Tuple
 import os
 import tempfile
 import textwrap
-from app.services.ai_enhancements import get_ai_enhancement_service
+from app.services.stable_diffusion import StableDiffusionService
 import requests
 from io import BytesIO
+from app.core.config import settings
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,19 @@ class VideoGenerator:
         
         # Try to find a suitable font
         self.font_path = self._find_font()
+
+        self.sd_service = StableDiffusionService()  
         
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        # Go up to backend directory (from app/services/ -> app -> backend)
+        backend_dir = os.path.dirname(os.path.dirname(current_file_dir))
+        
+        # Create directories in backend root
+        self.images_dir = os.path.join(backend_dir, "images")
+        self.videos_dir = os.path.join(backend_dir, "videos")
+        os.makedirs(self.images_dir, exist_ok=True)
+        os.makedirs(self.videos_dir, exist_ok=True)
+
         logger.info(f"VideoGenerator initialized: {self.width}x{self.height} @ {self.fps}fps")
         logger.info(f"Using font: {self.font_path if self.font_path else 'default'}")
     
@@ -201,6 +215,343 @@ class VideoGenerator:
             logger.warning(f"Failed to create background from image: {e}")
             return None
     
+    def _create_prompt(self, text: str, style: str) -> str:
+        """
+        Create optimized Stable Diffusion prompt from highlight text
+        
+        Args:
+            text: Highlight text
+            style: Visual style context
+            
+        Returns:
+            Optimized prompt string
+        """
+        text_lower = text.lower()
+        
+        # Determine mood/style based on content
+        if any(word in text_lower for word in ['exciting', 'amazing', 'breakthrough', 'incredible', 'wow']):
+            mood = "energetic, dynamic, vibrant"
+        elif any(word in text_lower for word in ['serious', 'important', 'critical', 'problem', 'challenge']):
+            mood = "serious, focused, professional"
+        elif any(word in text_lower for word in ['calm', 'peaceful', 'serene', 'gentle']):
+            mood = "calm, peaceful, serene"
+        else:
+            mood = "balanced, contemporary"
+        
+        # Build prompt based on style
+        if style == "podcast studio":
+            prompt = f"Cute chibi anime character doing a podcast, energetic and dynamic atmosphere."
+        elif style == "abstract":
+            prompt = f"Chibi anime character hosting a podcast with a serious and focused mood. Clean studio setup, high-quality microphone, calm lighting, neutral colors, organized desk. serious, focused, professional"
+        elif style == "nature":
+            prompt = f"Soft chibi anime character doing a peaceful and serene podcast session. Pastel colors, gentle lighting, cozy room, soft shadows, relaxed expression, cute studio microphone. calm, peaceful, serene"
+        elif style == "tech":
+            prompt = f"Chibi anime character recording a podcast, balanced and contemporary aesthetic. Modern studio desk, charming expression, clean lineart, soft but clear lighting. balanced, contemporary, modern"
+        else:
+            prompt = f"{style} background, {mood}, professional, high quality, detailed"
+        
+        return prompt
+    
+    def generate_background_image(
+        self,
+        text: str,
+        style: str = "podcast studio",
+        seed: Optional[int] = None
+    ) -> Image.Image:
+        """
+        Generate background image based on highlight text
+        
+        Args:
+            text: Highlight text to generate image from
+            style: Visual style/context (e.g., "podcast studio", "abstract", "nature")
+            seed: Random seed for reproducibility
+            
+        Returns:
+            PIL Image
+        """
+        try:
+            # Create optimized prompt from highlight text
+            prompt = self._create_prompt(text, style)
+            
+            logger.info(f"Generating background for: '{text[:50]}...'")
+            
+            # Generate image using SD service
+            image = self.sd_service.generate_image(
+                prompt=prompt,
+                negative_prompt="blurry, bad quality, distorted, ugly, text, watermark, low resolution",
+                width=512,
+                height=512,
+                num_inference_steps=20,
+                guidance_scale=7.5,
+                seed=seed
+            )
+            
+            image_path = os.path.join("images", f"image__{datetime.now().strftime("%Y%m%d_%H%M%S")}.png")
+            self.sd_service.save_image(image, image_path)
+
+            return image
+            
+        except Exception as e:
+            logger.error(f"Failed to generate image: {e}")
+            raise
+    
+    def generate_images_for_highlights(
+        self,
+        highlights: List[str],
+        style: str = "podcast studio",
+        seed: Optional[int] = None
+    ) -> List[Image.Image]:
+        """
+        Generate multiple background images for podcast highlights
+        
+        Args:
+            highlights: List of highlight text snippets
+            style: Visual style for all images
+            seed: Base seed (will be incremented for each image)
+            
+        Returns:
+            List of PIL Images
+        """
+        images = []
+        
+        for i, highlight in enumerate(highlights):
+            logger.info(f"Processing highlight {i+1}/{len(highlights)}")
+            
+            # Use seed + i for variation while maintaining consistency
+            current_seed = seed + i if seed is not None else None
+            
+            try:
+                image = self.generate_background_image(
+                    text=highlight,
+                    style=style,
+                    seed=current_seed
+                )
+                images.append(image)
+                
+                # Save individual image
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                image_path = os.path.join(self.images_dir, f"highlight_{i}_{timestamp}.png")
+                self.sd_service.save_image(image, image_path)
+                
+            except Exception as e:
+                logger.error(f"Failed to generate image for highlight {i}: {e}")
+                # Continue with other highlights
+                continue
+        
+        logger.info(f"Generated {len(images)} images")
+        return images
+
+    def create_video_from_images(
+        self,
+        images: List[Image.Image],
+        audio_path: Optional[str] = None,
+        output_filename: str = "podcast_video.mp4",
+        fps: int = 24,
+        duration_per_image: float = 3.0,
+        transition_duration: float = 0.5,
+        add_ken_burns: bool = True
+    ) -> str:
+        """
+        Create video from generated images with optional audio
+        
+        Args:
+            images: List of PIL Images
+            audio_path: Path to audio file (optional)
+            output_filename: Output video filename
+            fps: Frames per second
+            duration_per_image: Duration each image is shown (seconds)
+            transition_duration: Crossfade transition duration (seconds)
+            add_ken_burns: Add zoom/pan animation to static images
+            
+        Returns:
+            Path to generated video
+        """
+        try:
+            from moviepy.editor import ImageSequenceClip, AudioFileClip, concatenate_videoclips
+            import numpy as np
+            
+            # Try importing transitions (compatibility for different moviepy versions)
+            try:
+                from moviepy.video.fx.all import crossfadein, crossfadeout
+            except ImportError:
+                # MoviePy 2.x uses different import path
+                try:
+                    from moviepy.video.fx.crossfadein import crossfadein
+                    from moviepy.video.fx.crossfadeout import crossfadeout
+                except ImportError:
+                    crossfadein = None
+                    crossfadeout = None
+                    logger.warning("Crossfade effects not available, videos will have no transitions")
+            
+            if not images:
+                raise ValueError("No images provided for video creation")
+            
+            logger.info(f"Creating video from {len(images)} images")
+            
+            # Convert PIL images to numpy arrays
+            image_arrays = [np.array(img) for img in images]
+            
+            # Create clips for each image with transitions
+            clips = []
+            for i, img_array in enumerate(image_arrays):
+                # Create clip from single image
+                clip = ImageSequenceClip([img_array], fps=fps)
+                clip = clip.set_duration(duration_per_image)
+                
+                # Add Ken Burns effect (zoom and pan animation)
+                if add_ken_burns:
+                    clip = self._add_ken_burns_effect(clip, i)
+                
+                # Add crossfade transitions if available
+                if crossfadein and crossfadeout:
+                    if i > 0:
+                        clip = crossfadein(clip, transition_duration)
+                    if i < len(image_arrays) - 1:
+                        clip = crossfadeout(clip, transition_duration)
+                
+                clips.append(clip)
+            
+            # Concatenate all clips
+            final_clip = concatenate_videoclips(clips, method="compose")
+            
+            # Add audio if provided
+            if audio_path and os.path.exists(audio_path):
+                logger.info(f"Adding audio: {audio_path}")
+                audio = AudioFileClip(audio_path)
+                
+                # Trim or loop video to match audio length
+                if final_clip.duration < audio.duration:
+                    # Loop video to match audio
+                    n_loops = int(audio.duration / final_clip.duration) + 1
+                    final_clip = concatenate_videoclips([final_clip] * n_loops)
+                
+                final_clip = final_clip.set_duration(audio.duration)
+                final_clip = final_clip.set_audio(audio)
+            
+            # Save video  
+            output_path = os.path.join(self.videos_dir, output_filename)
+            
+            logger.info(f"Saving video to: {os.path.abspath(output_path)}")
+            
+            final_clip.write_videofile(
+                output_path,
+                fps=fps,
+                codec='libx264',
+                audio_codec='aac',
+                temp_audiofile='temp-audio.m4a',
+                remove_temp=True,
+                logger=None  # Suppress moviepy's verbose logging
+            )
+            
+            logger.info(f"✓ Video saved: {output_path}")
+            return output_path
+            
+        except ImportError:
+            logger.error("moviepy not installed. Install with: pip install moviepy")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to create video: {e}")
+            raise
+    
+    def _add_ken_burns_effect(self, clip, index):
+        """
+        Add Ken Burns effect (zoom and pan) to make static images more dynamic
+        
+        Args:
+            clip: MoviePy clip
+            index: Image index (used to vary the effect)
+            
+        Returns:
+            Animated clip
+        """
+        try:
+            # Alternate between zoom in and zoom out
+            zoom_in = index % 2 == 0
+            duration = clip.duration
+            
+            def zoom_effect(get_frame, t):
+                frame = get_frame(t)
+                h, w = frame.shape[:2]
+                
+                # Calculate zoom factor over time (1.0 to 1.15)
+                progress = t / duration
+                if zoom_in:
+                    zoom = 1.0 + (0.15 * progress)
+                else:
+                    zoom = 1.15 - (0.15 * progress)
+                
+                # Calculate crop box for zoom effect
+                new_h, new_w = int(h / zoom), int(w / zoom)
+                
+                # Center crop
+                top = (h - new_h) // 2
+                left = (w - new_w) // 2
+                
+                # Crop and resize back to original size
+                from PIL import Image
+                import numpy as np
+                img = Image.fromarray(frame)
+                img = img.crop((left, top, left + new_w, top + new_h))
+                img = img.resize((w, h), Image.Resampling.LANCZOS)
+                
+                return np.array(img)
+            
+            return clip.fl(zoom_effect)
+            
+        except Exception as e:
+            logger.warning(f"Could not apply Ken Burns effect: {e}")
+            return clip
+    
+
+    def generate_podcast_video(
+        self,
+        highlights: List[str],
+        audio_path: str,
+        style: str = "podcast studio",
+        seed: Optional[int] = None,
+        output_filename: Optional[str] = None
+    ) -> str:
+        """
+        Complete pipeline: Generate images from highlights and create video with audio
+        
+        Args:
+            highlights: List of podcast highlight texts
+            audio_path: Path to podcast audio file
+            style: Visual style for images
+            seed: Random seed for reproducibility
+            output_filename: Custom output filename (auto-generated if None)
+            
+        Returns:
+            Path to generated video
+        """
+        logger.info("Starting podcast video generation pipeline")
+        
+        # Generate images
+        images = self.generate_background_image(
+            text=highlights,
+            style=style,
+            seed=seed
+        )
+        
+        if not images:
+            raise ValueError("No images were generated")
+        
+        # Generate output filename
+        if output_filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_filename = f"podcast_{timestamp}.mp4"
+        
+        # Create video
+        video_path = self.create_video_from_images(
+            images=images,
+            audio_path=audio_path,
+            output_filename=output_filename,
+            duration_per_image=len(highlights) / len(images) if audio_path else 3.0
+        )
+        
+        logger.info("✓ Podcast video generation complete")
+        return video_path
+        
     def create_highlight_video(
         self,
         audio_path: str,
@@ -261,24 +612,46 @@ class VideoGenerator:
                     logger.warning(f"Failed to generate AI hook, using default: {e}")
                     video_title = title
             
-            # 3. Create background (AI or gradient)
+            # 3. Create background (Stable Diffusion, DALL-E, or gradient)
             background = None
-            if use_ai_background:
+            
+            # Try Stable Diffusion first (local, free)
+            if settings.USE_STABLE_DIFFUSION:
+                try:
+                    logger.info("🎨 Generating background with Stable Diffusion (local)...")
+                    sd_service = get_stable_diffusion_service()
+                    bg_image = sd_service.generate_background_image(
+                        highlight.get('text', ''),
+                        width=settings.SD_IMAGE_WIDTH,
+                        height=settings.SD_IMAGE_HEIGHT,
+                        num_inference_steps=settings.SD_INFERENCE_STEPS
+                    )
+                    if bg_image:
+                        background = self._create_background_from_image(bg_image, duration)
+                        logger.info("✅ Using Stable Diffusion background")
+                except Exception as e:
+                    logger.warning(f"Failed to generate Stable Diffusion background: {e}")
+            
+            # Try DALL-E if Stable Diffusion failed and enabled
+            if background is None and use_ai_background:
                 try:
                     logger.info("🎨 Generating AI background with DALL-E...")
                     ai_service = get_ai_enhancement_service()
+                    # DALL-E 3 only supports: 1024x1024, 1024x1792, or 1792x1024
+                    # Use 1024x1792 for vertical format (closest to our 1080x1920)
+                    dalle_size = "1024x1792"
                     bg_image = ai_service.generate_background_image(
                         highlight.get('text', ''),
-                        size=f"{self.width}x{self.height}",
+                        size=dalle_size,
                         quality="standard"
                     )
                     if bg_image:
                         background = self._create_background_from_image(bg_image, duration)
-                        logger.info("✅ Using AI-generated background")
+                        logger.info("✅ Using DALL-E background")
                 except Exception as e:
-                    logger.warning(f"Failed to generate AI background, falling back to gradient: {e}")
+                    logger.warning(f"Failed to generate DALL-E background: {e}")
             
-            # Fallback to animated gradient if AI background failed or disabled
+            # Fallback to animated gradient if both AI methods failed or disabled
             if background is None:
                 logger.info("🌈 Creating animated gradient background...")
                 background = self._create_animated_gradient(duration)

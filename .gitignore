@@ -23,6 +23,8 @@ next-env.d.ts
 # Uploads & Outputs (don't commit user files)
 backend/uploads/
 backend/outputs/
+backend/images/
+backend/videos/
 
 # Environment files (sensitive data)
 .env

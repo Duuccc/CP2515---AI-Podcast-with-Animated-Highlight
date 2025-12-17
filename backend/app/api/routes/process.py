@@ -82,6 +82,7 @@ async def process_audio_task(job_id: str, audio_path: str):
         
         video_generator = get_video_generator()
         video_paths = []
+        images = []
         
         if not highlights:
             logger.warning(f"[{job_id}] No highlights found, skipping video generation")
@@ -101,24 +102,19 @@ async def process_audio_task(job_id: str, audio_path: str):
                     logger.info(f"[{job_id}] Video {i+1} - Highlight: {highlight.get('start_time', 0):.1f}s to {highlight.get('end_time', 0):.1f}s")
                     
                     # Generate video and capture AI hook if generated
-                    output_path, ai_hook = video_generator.create_highlight_video(
+                    image = video_generator.generate_background_image(
+                        text=highlight.get('text', '')
+                    )
+
+                    video_generator.create_video_from_images(
+                        images=[image],
                         audio_path=audio_path,
-                        highlight=highlight,
-                        output_path=str(video_path),
-                        title=f"Podcast Highlight #{i+1}",
-                        use_ai_hook=settings.USE_AI_HOOK,
-                        use_ai_background=settings.USE_AI_BACKGROUND
+                        output_filename=f"podcast_video_{i+1}.mp4"
                     )
                     
-                    # Store AI hook in highlight metadata
-                    if ai_hook:
-                        highlight['ai_hook'] = ai_hook
-                        logger.info(f"[{job_id}] Video {i+1} - AI hook: '{ai_hook}'")
+                    images.append(image)
                     
-                    # Store relative path for frontend
-                    video_paths.append(f"/outputs/{job_id}/highlight_{i+1}.mp4")
-                    
-                    logger.info(f"[{job_id}] Successfully generated video {i+1}/{len(highlights)}")
+                    logger.info(f"[{job_id}] Successfully generated background image for highlight {i+1}")
                     
                 except Exception as e:
                     import traceback
@@ -127,6 +123,8 @@ async def process_audio_task(job_id: str, audio_path: str):
                     logger.error(f"[{job_id}] Error traceback: {error_trace}")
                     # Continue with other videos even if one fails
                     continue
+
+            
         
         # Stage 4: Complete (100%)
         logger.info(f"[{job_id}] Processing complete! Generated {len(video_paths)} videos")

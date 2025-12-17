@@ -21,8 +21,14 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     
     # AI Enhancement Features
-    USE_AI_HOOK: bool = True  # Enable GPT-4 hook generation (fast, cheap)
+    USE_AI_HOOK: bool = False  # Enable GPT-4 hook generation (fast, cheap) - DISABLED due to quota
     USE_AI_BACKGROUND: bool = False  # Enable DALL-E background generation (slower, costs ~$0.04 per video)
+    
+    # Stable Diffusion (Local Generation)
+    USE_STABLE_DIFFUSION: bool = True  # Enable local Stable Diffusion background generation (free, uses GPU)
+    SD_IMAGE_WIDTH: int = 512  # Image width (512 for 4GB VRAM, 768+ for more VRAM)
+    SD_IMAGE_HEIGHT: int = 896  # Image height (896 for vertical 9:16, adjust for aspect ratio)
+    SD_INFERENCE_STEPS: int = 20  # Number of steps (20-30 for speed, 50 for quality)
     
     # Redis for task queue (optional for now)
     REDIS_URL: str = "redis://localhost:6379"
