@@ -102,14 +102,17 @@ async def process_audio_task(job_id: str, audio_path: str):
                     logger.info(f"[{job_id}] Video {i+1} - Highlight: {highlight.get('start_time', 0):.1f}s to {highlight.get('end_time', 0):.1f}s")
                     
                     # Generate video and capture AI hook if generated
-                    image = video_generator.generate_background_image(
-                        text=highlight.get('text', '')
-                    )
+                    images = []
+                    for i in range(3):
+                        image = video_generator.generate_background_image(
+                            text=highlight.get('text', '')
+                        )
+                        images.append(image)
 
                     video_generator.create_video_from_images(
-                        images=[image],
+                        images=images,
                         audio_path=audio_path,
-                        output_filename=f"podcast_video_{i+1}.mp4"
+                        output_filename=video_path
                     )
                     
                     images.append(image)

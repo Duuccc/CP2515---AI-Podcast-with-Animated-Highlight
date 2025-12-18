@@ -45,7 +45,7 @@ class VideoGenerator:
         
         # Create directories in backend root
         self.images_dir = os.path.join(backend_dir, "images")
-        self.videos_dir = os.path.join(backend_dir, "videos")
+        self.videos_dir = backend_dir
         os.makedirs(self.images_dir, exist_ok=True)
         os.makedirs(self.videos_dir, exist_ok=True)
 
@@ -272,13 +272,14 @@ class VideoGenerator:
         try:
             # Create optimized prompt from highlight text
             prompt = self._create_prompt(text, style)
+            prompt = "anime style illustration, high quality, detailed anime character, young anime girl hosting a podcast, sitting at a desk, professional podcast setup, headphones on, modern podcast studio, soft studio lighting, cozy atmosphere, clean background, sharp lineart, vibrant colors, cel shading, depth of field, 4k, masterpiece, best quality"
             
             logger.info(f"Generating background for: '{text[:50]}...'")
             
             # Generate image using SD service
             image = self.sd_service.generate_image(
                 prompt=prompt,
-                negative_prompt="blurry, bad quality, distorted, ugly, text, watermark, low resolution",
+                negative_prompt="low quality, worst quality, blurry, jpeg artifacts, bad anatomy, extra fingers, missing fingers, deformed face, cross-eye, poorly drawn hands, watermark, logo, text, cropped, out of frame, nsfw",
                 width=512,
                 height=512,
                 num_inference_steps=20,
